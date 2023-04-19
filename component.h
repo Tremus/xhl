@@ -34,8 +34,9 @@ enum xcomp_flag
 {
     XCOMP_FLAG_IS_HIDDEN = 1 << 0,
     XCOMP_FLAG_IS_MOUSE_OVER = 1 << 1,
-    XCOMP_FLAG_IS_DRAGGING = 1 << 2,
-    XCOMP_FLAG_WANTS_KEYBOARD_FOCUS = 1 << 3,
+    XCOMP_FLAG_IS_MOUSE_DOWN = 1 << 2,
+    XCOMP_FLAG_IS_DRAGGING = 1 << 3,
+    XCOMP_FLAG_WANTS_KEYBOARD_FOCUS = 1 << 4,
 };
 
 struct xcomp_position { float x; float y; };
@@ -49,7 +50,7 @@ union xcomp_event_data
 struct xcomp_component
 {
     xcomp_component* parent;
-    xcomp_component* children;
+    xcomp_component** children;
     int num_children;
     int cap_children;
 
@@ -85,7 +86,7 @@ void xcomp_remove_child(xcomp_component* comp, xcomp_component* child);
 // set flag, send event
 void xcomp_set_visible(xcomp_component* comp, int visible);
 // checks through parent heirarchy until it finds the root 
-void xcomp_get_root_component(xcomp_component* comp);
+xcomp_component* xcomp_get_root_component(xcomp_component* comp);
 // returns 0/1 dependon on weather the coordinate lies within component bounds
 int xcomp_hit_test(xcomp_component*, float x, float y);
 
@@ -99,13 +100,131 @@ xcomp_component* xcomp_find_child_at(xcomp_component*, float x, float y);
 xcomp_component* xcomp_find_parent_at(xcomp_component*, float x, float y);
 
 // APP METHODS
-void xcomp_send_mouse_message(xcomp_root*, float x, float y);
-void xcomp_send_keyboard_message(xcomp_root*, int charcode, int isdown);
+void xcomp_send_mouse_message(xcomp_root*, float x, float y, xcomp_event_data info);
+void xcomp_send_keyboard_message(xcomp_root*, int charcode, xcomp_event_data info);
 
 
+#define XHL_COMPONENT_IMPL
 #ifdef XHL_COMPONENT_IMPL
 
-// TODO
+void xcomp_set_bounds(xcomp_component* comp, float x, float y, float width, float height) {
+    comp->x = x;
+    comp->y = y;
+    comp->width = width;
+    comp->height = height;
+    comp->handle_event(comp, XCOMP_EVENT_POSITION_CHANGED, {.raw = 0ul});
+    comp->handle_event(comp, XCOMP_EVENT_SIZE_CHANGED, {.raw = 0ul});
+    comp->handle_event(comp, XCOMP_EVENT_BOUNDS_CHANGED, {.raw = 0ul});
+}
+
+void xcomp_set_position(xcomp_component* comp, float x, float y) {
+    comp->x = x;
+    comp->y = y;
+    comp->handle_event(comp, XCOMP_EVENT_POSITION_CHANGED, {.raw = 0ul});
+    comp->handle_event(comp, XCOMP_EVENT_BOUNDS_CHANGED, {.raw = 0ul});
+}
+
+void xcomp_set_size(xcomp_component* comp, float width, float height) {
+    comp->width = width;
+    comp->height = height;
+    comp->handle_event(comp, XCOMP_EVENT_SIZE_CHANGED, {.raw = 0ul});
+    comp->handle_event(comp, XCOMP_EVENT_BOUNDS_CHANGED, {.raw = 0ul});
+}
+
+void xcomp_add_child(xcomp_component* comp, xcomp_component* child) {
+    comp->children[comp->num_children] = child;
+    child->parent = comp;
+    comp->num_children += 1;
+}
+
+void xcomp_remove_child(xcomp_component* comp, xcomp_component* child) {
+    int child_was_removed = 0;
+    int i = 0;
+
+    // Search through nodes an zero the child comp
+    for (; i < comp->num_children; i++) {
+        // try and remove child
+        if (comp->children[i] == child) {
+            child->parent = 0; 
+            comp->children[i] = 0;
+            child_was_removed = 1;
+            break;
+        }
+    }
+    if (child_was_removed) {
+        // shuffle children back one place
+        i += 1;
+        for (; i < comp->num_children; i++) {
+            comp->children[i-1] = comp->children[i];
+        }
+
+        comp->num_children -= 1;
+    }
+}
+
+void xcomp_set_visible(xcomp_component* comp, int visible) {
+    if (visible) {
+        comp->flags &= ~XCOMP_FLAG_IS_HIDDEN;
+    } else {
+        comp->flags |= XCOMP_FLAG_IS_HIDDEN;
+    }
+    comp->handle_event(comp, XCOMP_EVENT_VISIBILITY_CHANGED, {.raw = (unsigned long)visible});
+}
+
+xcomp_component* xcomp_get_root_component(xcomp_component* comp) {
+    xcomp_component* c = comp;
+    while (c->parent != 0)
+        c = c->parent;
+    return c;
+}
+
+int xcomp_hit_test(xcomp_component* comp, float x, float y) {
+    return x >= comp->x &&
+           y >= comp->y &&
+           x <= (comp->x + comp->width) &&
+           y <= (comp->y + comp->height);
+}
+
+xcomp_component* xcomp_find_child_at(xcomp_component* comp, float x, float y) {
+    for (int i = comp->num_children - 1; i >= 0; i--) {
+        if (xcomp_hit_test(comp->children[i], x, y))
+            return xcomp_find_child_at(comp->children[i], x, y);
+    }
+    return comp;
+}
+
+xcomp_component* xcomp_find_parent_at(xcomp_component* comp, float x, float y) {
+    if (comp->parent != 0 && !xcomp_hit_test(comp->parent, x, y))
+         return xcomp_find_parent_at(comp->parent, x, y);
+    return 0;
+}
+
+void xcomp_send_mouse_message(xcomp_root* root, float x, float y, xcomp_event_data info) {
+    if (root->current_mouse_over == 0) {
+        root->current_mouse_over = xcomp_find_child_at(root->root_component, x, y);
+        root->current_mouse_over->flags |= XCOMP_FLAG_IS_MOUSE_OVER;
+        root->current_mouse_over->handle_event(root->current_mouse_over, XCOMP_EVENT_MOUSE_ENTER, info);
+        root->current_mouse_over->handle_event(root->current_mouse_over, XCOMP_EVENT_MOUSE_MOVE, info);
+    } else {
+        xcomp_component* last_over = root->current_mouse_over;
+        root->current_mouse_over = xcomp_find_child_at(last_over, x, y);
+        if (last_over == root->current_mouse_over) {
+            root->current_mouse_over->handle_event(root->current_mouse_over, XCOMP_EVENT_MOUSE_MOVE, info);
+        } else {
+            last_over->handle_event(last_over, XCOMP_EVENT_MOUSE_EXIT, info);
+            root->current_mouse_over->handle_event(root->current_mouse_over, XCOMP_EVENT_MOUSE_ENTER, info);
+            root->current_mouse_over->handle_event(root->current_mouse_over, XCOMP_EVENT_MOUSE_MOVE, info);
+        }
+    }
+    // TODO: handle mouse down
+    // TODO: handle mouse wheel
+    // TODO: handle mouse pinch
+}
+
+void xcomp_send_keyboard_message(xcomp_root*, int charcode, xcomp_event_data info) {
+    // TODO
+}
+
 
 #endif // XHL_COMPONENT_IMPL
 #endif // XHL_COMPONENT_H
