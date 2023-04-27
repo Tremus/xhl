@@ -116,7 +116,6 @@ void xcomp_send_keyboard_message(xcomp_root*,
                                  unsigned int charcode,
                                  xcomp_event_data info);
 
-#define XHL_COMPONENT_IMPL
 #ifdef XHL_COMPONENT_IMPL
 
 void xcomp_set_dimension(
