@@ -69,7 +69,9 @@ struct xcomp_component {
     xcomp_rectangle dimension;
 
     long flags;
-    bool (*handle_event)(xcomp_component*, int event, xcomp_event_data data);
+    bool (*handle_event)(xcomp_component*,
+                         unsigned int event,
+                         xcomp_event_data data);
 };
 
 struct xcomp_root {
@@ -91,7 +93,7 @@ void xcomp_add_child(xcomp_component* comp, xcomp_component* child);
 // resizes num children
 void xcomp_remove_child(xcomp_component* comp, xcomp_component* child);
 // set flag, send event
-void xcomp_set_visible(xcomp_component* comp, int visible);
+void xcomp_set_visible(xcomp_component* comp, bool visible);
 // checks through parent heirarchy until it finds the root
 xcomp_component* xcomp_get_root_component(xcomp_component* comp);
 // returns 0/1 dependon on weather the coordinate lies within component
@@ -153,8 +155,8 @@ void xcomp_add_child(xcomp_component* comp, xcomp_component* child) {
 }
 
 void xcomp_remove_child(xcomp_component* comp, xcomp_component* child) {
-    int child_was_removed = 0;
-    int i = 0;
+    bool child_was_removed = false;
+    unsigned int i = 0;
 
     // Search through nodes an zero the child comp
     for (; i < comp->num_children; i++) {
@@ -162,7 +164,7 @@ void xcomp_remove_child(xcomp_component* comp, xcomp_component* child) {
         if (comp->children[i] == child) {
             child->parent = 0;
             comp->children[i] = 0;
-            child_was_removed = 1;
+            child_was_removed = true;
             break;
         }
     }
@@ -177,7 +179,7 @@ void xcomp_remove_child(xcomp_component* comp, xcomp_component* child) {
     }
 }
 
-void xcomp_set_visible(xcomp_component* comp, int visible) {
+void xcomp_set_visible(xcomp_component* comp, bool visible) {
     if (visible) {
         comp->flags &= ~XCOMP_FLAG_IS_HIDDEN;
     } else {
@@ -202,7 +204,7 @@ bool xcomp_hit_test(xcomp_component* comp, float x, float y) {
 }
 
 xcomp_component* xcomp_find_child_at(xcomp_component* comp, float x, float y) {
-    for (int i = comp->num_children - 1; i >= 0; i--) {
+    for (unsigned int i = comp->num_children - 1; i >= 0; i--) {
         if (xcomp_hit_test(comp->children[i], x, y))
             return xcomp_find_child_at(comp->children[i], x, y);
     }
