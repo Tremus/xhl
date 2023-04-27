@@ -68,7 +68,7 @@ struct xcomp_component {
 
     xcomp_rectangle dimension;
 
-    long flags;
+    unsigned long flags;
     bool (*handle_event)(xcomp_component*,
                          unsigned int event,
                          xcomp_event_data data);
