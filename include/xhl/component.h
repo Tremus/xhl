@@ -155,8 +155,8 @@ extern "C" {
 #include <string.h>
 
 void xcomp_init(xcomp_component* comp, void* data) {
-    comp->parent = 0;
-    comp->children = 0;
+    comp->parent = NULL;
+    comp->children = NULL;
     comp->num_children = 0;
     comp->cap_children = 0;
 
@@ -209,7 +209,7 @@ void xcomp_add_child(xcomp_component* comp, xcomp_component* child) {
 
 void xcomp_remove_child(xcomp_component* comp, xcomp_component* child) {
     bool child_was_removed = false;
-    int i = 0;
+    size_t i = 0;
 
     // Search through nodes an zero the child comp
     for (; i < comp->num_children; i++) {
@@ -244,7 +244,7 @@ void xcomp_set_visible(xcomp_component* comp, bool visible) {
 
 xcomp_component* xcomp_get_root_component(xcomp_component* comp) {
     xcomp_component* c = comp;
-    while (c->parent != 0)
+    while (c->parent != NULL)
         c = c->parent;
     return c;
 }
@@ -265,37 +265,57 @@ xcomp_component* xcomp_find_child_at(xcomp_component* comp, float x, float y) {
 }
 
 xcomp_component* xcomp_find_parent_at(xcomp_component* comp, float x, float y) {
-    if (comp->parent != 0 && !xcomp_hit_test(comp->parent, x, y))
+    if (comp->parent != NULL && !xcomp_hit_test(comp->parent, x, y))
         return xcomp_find_parent_at(comp->parent, x, y);
-    return 0;
+    return NULL;
+}
+
+void xcomp_send_mouse_enter(xcomp_component* comp, xcomp_event_data info) {
+    comp->flags |= XCOMP_FLAG_IS_MOUSE_OVER;
+    comp->event_handler(comp, XCOMP_EVENT_MOUSE_ENTER, info);
+    comp->event_handler(comp, XCOMP_EVENT_MOUSE_MOVE, info);
+}
+
+void xcomp_send_mouse_exit(xcomp_component* comp, xcomp_event_data info) {
+    comp->flags &= ~XCOMP_FLAG_IS_MOUSE_OVER;
+    comp->event_handler(comp, XCOMP_EVENT_MOUSE_EXIT, info);
 }
 
 void xcomp_send_mouse_message(xcomp_root* root, float x, float y,
                               xcomp_event_data info) {
-    if (root->mouse_over == 0) {
-        root->mouse_over = xcomp_find_child_at(root->main, x, y);
-        root->mouse_over->flags |= XCOMP_FLAG_IS_MOUSE_OVER;
-        root->mouse_over->event_handler(root->mouse_over,
-                                        XCOMP_EVENT_MOUSE_ENTER, info);
-        root->mouse_over->event_handler(root->mouse_over,
-                                        XCOMP_EVENT_MOUSE_MOVE, info);
+
+    xcomp_component* last_over = root->mouse_over;
+    xcomp_component* next_over = NULL;
+
+    if (last_over == NULL) {
+        if (xcomp_hit_test(root->main, x, y)) {
+            next_over = xcomp_find_child_at(root->main, x, y);
+
+            root->mouse_over = next_over;
+
+            xcomp_send_mouse_enter(next_over, info);
+        }
+
     } else {
-        xcomp_component* last_over = root->mouse_over;
-        root->mouse_over = xcomp_find_child_at(last_over, x, y);
 
-        if (last_over == root->mouse_over) {
-            root->mouse_over->event_handler(root->mouse_over,
-                                            XCOMP_EVENT_MOUSE_MOVE, info);
+        // check mouse still over
+        if (xcomp_hit_test(last_over, x, y))
+            next_over = xcomp_find_child_at(last_over, x, y);
+        else // mouse exited
+            next_over = xcomp_find_parent_at(last_over, x, y);
+
+        root->mouse_over = next_over;
+
+        // if failed finding child
+        if (last_over == next_over) {
+            next_over->event_handler(next_over, XCOMP_EVENT_MOUSE_MOVE, info);
         } else {
-            last_over->flags &= ~XCOMP_FLAG_IS_MOUSE_OVER;
-            last_over->event_handler(last_over, XCOMP_EVENT_MOUSE_EXIT, info);
+            // mouse moved to child or parent
+            xcomp_send_mouse_exit(last_over, info);
 
-            root->mouse_over->flags |= XCOMP_FLAG_IS_MOUSE_OVER;
-            root->mouse_over->event_handler(root->mouse_over,
-                                            XCOMP_EVENT_MOUSE_ENTER, info);
-
-            root->mouse_over->event_handler(root->mouse_over,
-                                            XCOMP_EVENT_MOUSE_MOVE, info);
+            if (next_over != NULL) {
+                xcomp_send_mouse_enter(next_over, info);
+            }
         }
     }
     // TODO: handle mouse down
