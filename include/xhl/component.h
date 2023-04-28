@@ -16,9 +16,12 @@ extern "C" {
 
 enum xcomp_event : uint32_t
 {
+    XCOMP_EVENT_PAINT,
+    // geometry
     XCOMP_EVENT_POSITION_CHANGED,
     XCOMP_EVENT_SIZE_CHANGED,
     XCOMP_EVENT_DIMENSION_CHANGED,
+    XCOMP_EVENT_VISIBILITY_CHANGED,
     // mouse
     XCOMP_EVENT_MOUSE_ENTER,
     XCOMP_EVENT_MOUSE_EXIT,
@@ -30,11 +33,10 @@ enum xcomp_event : uint32_t
     XCOMP_EVENT_MOUSE_DROP,
     XCOMP_EVENT_MOUSE_WHEEL,
     XCOMP_EVENT_MOUSE_PINCH,
+    // keyboard
     XCOMP_EVENT_KEY_DOWN,
     XCOMP_EVENT_KEY_UP,
-    XCOMP_EVENT_VISIBILITY_CHANGED,
     XCOMP_EVENT_KEYBOARD_FOCUS_CHANGED,
-    XCOMP_EVENT_PAINT,
 };
 
 enum xcomp_flag : uint64_t
@@ -45,6 +47,16 @@ enum xcomp_flag : uint64_t
     XCOMP_FLAG_IS_DRAGGING = 1ul << 3,
     XCOMP_FLAG_WANTS_KEYBOARD_FOCUS = 1ul << 4,
     XCOMP_FLAG_OWNS_CHILDREN = 1ul << 5,
+};
+
+enum xcomp_modifier : uint64_t
+{
+    XCOMP_MOD_LEFT_BUTTON = 1 << 0,
+    XCOMP_MOD_RIGHT_BUTTON = 1 << 1,
+    XCOMP_MOD_MIDDLE_BUTTON = 1 << 2,
+    XCOMP_MOD_CTRL_BUTTON = 1 << 3,
+    XCOMP_MOD_ALT_BUTTON = 1 << 4,
+    XCOMP_MOD_SHIFT_BUTTON = 1 << 5,
 };
 
 union xcomp_position
@@ -74,7 +86,11 @@ typedef union xcomp_dimensions xcomp_dimensions;
 union xcomp_event_data
 {
     uint64_t raw;
-    xcomp_position position;
+    struct
+    {
+        float x;
+        float y;
+    };
 };
 typedef union xcomp_event_data xcomp_event_data;
 
@@ -298,7 +314,7 @@ xcomp_component* xcomp_find_child_at (xcomp_component* comp, float x, float y)
 xcomp_component* xcomp_find_parent_at (xcomp_component* comp, float x, float y)
 {
     if (comp->parent != NULL &&
-        !xcomp_hit_test (comp->parent->dimensions, x, y))
+        ! xcomp_hit_test (comp->parent->dimensions, x, y))
         return xcomp_find_parent_at (comp->parent, x, y);
 
     return NULL;
