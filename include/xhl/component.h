@@ -1,13 +1,19 @@
-#ifndef XHL_COMPONENT_H
-#define XHL_COMPONENT_H
+#pragma once
 
 /**
  * Quick and dirty component heirachy.
  * Should be easily extendable
- * No allocations or includes
+ * No allocations
  */
 
-enum xcomp_event {
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#include <stddef.h>
+#include <stdint.h>
+
+enum xcomp_event : uint32_t {
     XCOMP_EVENT_POSITION_CHANGED,
     XCOMP_EVENT_SIZE_CHANGED,
     XCOMP_EVENT_DIMENSION_CHANGED,
@@ -29,12 +35,13 @@ enum xcomp_event {
     XCOMP_EVENT_PAINT,
 };
 
-enum xcomp_flag {
-    XCOMP_FLAG_IS_HIDDEN = 1 << 0,
-    XCOMP_FLAG_IS_MOUSE_OVER = 1 << 1,
-    XCOMP_FLAG_IS_MOUSE_DOWN = 1 << 2,
-    XCOMP_FLAG_IS_DRAGGING = 1 << 3,
-    XCOMP_FLAG_WANTS_KEYBOARD_FOCUS = 1 << 4,
+enum xcomp_flag : uint64_t {
+    XCOMP_FLAG_IS_HIDDEN = 1ul << 0,
+    XCOMP_FLAG_IS_MOUSE_OVER = 1ul << 1,
+    XCOMP_FLAG_IS_MOUSE_DOWN = 1ul << 2,
+    XCOMP_FLAG_IS_DRAGGING = 1ul << 3,
+    XCOMP_FLAG_WANTS_KEYBOARD_FOCUS = 1ul << 4,
+    XCOMP_FLAG_OWNS_CHILDREN = 1ul << 5,
 };
 
 union xcomp_position {
@@ -45,7 +52,14 @@ union xcomp_position {
     float data[2]; // vec2
 };
 
-union xcomp_rectangle {
+struct xcomp_rectangle_t {
+    float x;
+    float y;
+    float width;
+    float height;
+};
+
+union xcomp_dimensions {
     struct {
         float x;
         float y;
@@ -56,22 +70,24 @@ union xcomp_rectangle {
 };
 
 union xcomp_event_data {
-    unsigned long raw;
+    uint64_t raw;
     xcomp_position position;
 };
 
 struct xcomp_component {
+    xcomp_rectangle_t dimensions;
+
     xcomp_component* parent;
     xcomp_component** children;
-    unsigned int num_children;
-    unsigned int cap_children;
+    size_t num_children;
+    size_t cap_children;
 
-    xcomp_rectangle dimension;
+    uint64_t flags;
+    bool (*event_handler)(xcomp_component*, uint32_t event,
+                          xcomp_event_data data);
 
-    unsigned long flags;
-    bool (*handle_event)(xcomp_component*,
-                         unsigned int event,
-                         xcomp_event_data data);
+    // Keep a ptr to your data here
+    void* data;
 };
 
 struct xcomp_root {
@@ -82,10 +98,14 @@ struct xcomp_root {
 
 // COMPONENT METHODS
 
-// set x/y/w/h on component, then send event
-void xcomp_set_dimension(xcomp_component* comp, xcomp_rectangle dimension);
+void xcomp_init(xcomp_component* comp, void* data);
 
-void xcomp_set_position(xcomp_component* comp, float x, float y);
+bool xcomp_empty_event_cb(xcomp_component*, uint32_t, xcomp_event_data);
+
+// set x/y/w/h on component, then send event
+void xcomp_set_dimensions(xcomp_component* comp, xcomp_dimensions dimensions);
+
+void xcomp_set_position(xcomp_component* comp, xcomp_position);
 void xcomp_set_size(xcomp_component* comp, float width, float height);
 
 // resizes num children
@@ -110,42 +130,75 @@ xcomp_component* xcomp_find_child_at(xcomp_component*, float x, float y);
 xcomp_component* xcomp_find_parent_at(xcomp_component*, float x, float y);
 
 // APP METHODS
-void xcomp_send_mouse_message(xcomp_root*,
-                              float x,
-                              float y,
+void xcomp_send_mouse_message(xcomp_root*, float x, float y,
                               xcomp_event_data info);
-void xcomp_send_keyboard_message(xcomp_root*,
-                                 unsigned int charcode,
+void xcomp_send_keyboard_message(xcomp_root*, uint32_t charcode,
                                  xcomp_event_data info);
 
+#ifdef __cplusplus
+}
+#endif
+
+// #define XHL_COMPONENT_IMPL
 #ifdef XHL_COMPONENT_IMPL
 
-void xcomp_set_dimension(
-    xcomp_component* comp, float x, float y, float width, float height) {
-    comp->dimension.x = x;
-    comp->dimension.y = y;
-    comp->dimension.width = width;
-    comp->dimension.height = height;
-    xcomp_event_data data = {.raw = 0ul};
-    comp->handle_event(comp, XCOMP_EVENT_POSITION_CHANGED, data);
-    comp->handle_event(comp, XCOMP_EVENT_SIZE_CHANGED, data);
-    comp->handle_event(comp, XCOMP_EVENT_DIMENSION_CHANGED, data);
+#ifndef XCOMP_INITIAL_CHILDREN_CAP
+#define XCOMP_INITIAL_CHILDREN_CAP 8
+#endif
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+void xcomp_init(xcomp_component* comp, void* data) {
+    comp->parent = 0;
+    comp->children = 0;
+    comp->num_children = 0;
+    comp->cap_children = 0;
+
+    comp->dimensions.x = 0.0f;
+    comp->dimensions.y = 0.0f;
+    comp->dimensions.width = 0.0f;
+    comp->dimensions.height = 0.0f;
+
+    comp->flags = 0;
+    comp->event_handler = &xcomp_empty_event_cb;
+    comp->data = data;
 }
 
-void xcomp_set_position(xcomp_component* comp, float x, float y) {
-    comp->dimension.x = x;
-    comp->dimension.y = y;
+bool xcomp_empty_event_cb(xcomp_component*, uint32_t, xcomp_event_data) {
+    return true;
+}
+
+void xcomp_set_dimensions(xcomp_component* comp, xcomp_dimensions dimensions) {
+    comp->dimensions.x = dimensions.x;
+    comp->dimensions.y = dimensions.y;
+    comp->dimensions.width = dimensions.width;
+    comp->dimensions.height = dimensions.height;
     xcomp_event_data data = {.raw = 0ul};
-    comp->handle_event(comp, XCOMP_EVENT_POSITION_CHANGED, data);
-    comp->handle_event(comp, XCOMP_EVENT_DIMENSION_CHANGED, data);
+    comp->event_handler(comp, XCOMP_EVENT_POSITION_CHANGED, data);
+    comp->event_handler(comp, XCOMP_EVENT_SIZE_CHANGED, data);
+    comp->event_handler(comp, XCOMP_EVENT_DIMENSION_CHANGED, data);
+}
+
+void xcomp_set_position(xcomp_component* comp, xcomp_position pos) {
+    comp->dimensions.x = pos.x;
+    comp->dimensions.y = pos.y;
+    xcomp_event_data data = {.raw = 0ul};
+    comp->event_handler(comp, XCOMP_EVENT_POSITION_CHANGED, data);
+    comp->event_handler(comp, XCOMP_EVENT_DIMENSION_CHANGED, data);
 }
 
 void xcomp_set_size(xcomp_component* comp, float width, float height) {
-    comp->dimension.width = width;
-    comp->dimension.height = height;
+    comp->dimensions.width = width;
+    comp->dimensions.height = height;
     xcomp_event_data data = {.raw = 0ul};
-    comp->handle_event(comp, XCOMP_EVENT_SIZE_CHANGED, data);
-    comp->handle_event(comp, XCOMP_EVENT_DIMENSION_CHANGED, data);
+    comp->event_handler(comp, XCOMP_EVENT_SIZE_CHANGED, data);
+    comp->event_handler(comp, XCOMP_EVENT_DIMENSION_CHANGED, data);
 }
 
 void xcomp_add_child(xcomp_component* comp, xcomp_component* child) {
@@ -156,14 +209,14 @@ void xcomp_add_child(xcomp_component* comp, xcomp_component* child) {
 
 void xcomp_remove_child(xcomp_component* comp, xcomp_component* child) {
     bool child_was_removed = false;
-    unsigned int i = 0;
+    int i = 0;
 
     // Search through nodes an zero the child comp
     for (; i < comp->num_children; i++) {
         // try and remove child
         if (comp->children[i] == child) {
-            child->parent = 0;
-            comp->children[i] = 0;
+            child->parent = nullptr;
+            comp->children[i] = nullptr;
             child_was_removed = true;
             break;
         }
@@ -186,7 +239,7 @@ void xcomp_set_visible(xcomp_component* comp, bool visible) {
         comp->flags |= XCOMP_FLAG_IS_HIDDEN;
     }
     xcomp_event_data data = {.raw = visible};
-    comp->handle_event(comp, XCOMP_EVENT_VISIBILITY_CHANGED, data);
+    comp->event_handler(comp, XCOMP_EVENT_VISIBILITY_CHANGED, data);
 }
 
 xcomp_component* xcomp_get_root_component(xcomp_component* comp) {
@@ -197,14 +250,14 @@ xcomp_component* xcomp_get_root_component(xcomp_component* comp) {
 }
 
 bool xcomp_hit_test(xcomp_component* comp, float x, float y) {
-    const float right = comp->dimension.x + comp->dimension.width;
-    const float bottom = comp->dimension.y + comp->dimension.height;
-    return x >= comp->dimension.x && y >= comp->dimension.y && x <= right
+    const float right = comp->dimensions.x + comp->dimensions.width;
+    const float bottom = comp->dimensions.y + comp->dimensions.height;
+    return x >= comp->dimensions.x && y >= comp->dimensions.y && x <= right
         && y <= bottom;
 }
 
 xcomp_component* xcomp_find_child_at(xcomp_component* comp, float x, float y) {
-    for (unsigned int i = comp->num_children - 1; i >= 0; i--) {
+    for (size_t i = comp->num_children; i-- > 0;) {
         if (xcomp_hit_test(comp->children[i], x, y))
             return xcomp_find_child_at(comp->children[i], x, y);
     }
@@ -217,29 +270,32 @@ xcomp_component* xcomp_find_parent_at(xcomp_component* comp, float x, float y) {
     return 0;
 }
 
-void xcomp_send_mouse_message(xcomp_root* root,
-                              float x,
-                              float y,
+void xcomp_send_mouse_message(xcomp_root* root, float x, float y,
                               xcomp_event_data info) {
     if (root->mouse_over == 0) {
         root->mouse_over = xcomp_find_child_at(root->main, x, y);
         root->mouse_over->flags |= XCOMP_FLAG_IS_MOUSE_OVER;
-        root->mouse_over->handle_event(
-            root->mouse_over, XCOMP_EVENT_MOUSE_ENTER, info);
-        root->mouse_over->handle_event(
-            root->mouse_over, XCOMP_EVENT_MOUSE_MOVE, info);
+        root->mouse_over->event_handler(root->mouse_over,
+                                        XCOMP_EVENT_MOUSE_ENTER, info);
+        root->mouse_over->event_handler(root->mouse_over,
+                                        XCOMP_EVENT_MOUSE_MOVE, info);
     } else {
         xcomp_component* last_over = root->mouse_over;
         root->mouse_over = xcomp_find_child_at(last_over, x, y);
+
         if (last_over == root->mouse_over) {
-            root->mouse_over->handle_event(
-                root->mouse_over, XCOMP_EVENT_MOUSE_MOVE, info);
+            root->mouse_over->event_handler(root->mouse_over,
+                                            XCOMP_EVENT_MOUSE_MOVE, info);
         } else {
-            last_over->handle_event(last_over, XCOMP_EVENT_MOUSE_EXIT, info);
-            root->mouse_over->handle_event(
-                root->mouse_over, XCOMP_EVENT_MOUSE_ENTER, info);
-            root->mouse_over->handle_event(
-                root->mouse_over, XCOMP_EVENT_MOUSE_MOVE, info);
+            last_over->flags &= ~XCOMP_FLAG_IS_MOUSE_OVER;
+            last_over->event_handler(last_over, XCOMP_EVENT_MOUSE_EXIT, info);
+
+            root->mouse_over->flags |= XCOMP_FLAG_IS_MOUSE_OVER;
+            root->mouse_over->event_handler(root->mouse_over,
+                                            XCOMP_EVENT_MOUSE_ENTER, info);
+
+            root->mouse_over->event_handler(root->mouse_over,
+                                            XCOMP_EVENT_MOUSE_MOVE, info);
         }
     }
     // TODO: handle mouse down
@@ -247,11 +303,13 @@ void xcomp_send_mouse_message(xcomp_root* root,
     // TODO: handle mouse pinch
 }
 
-void xcomp_send_keyboard_message(xcomp_root*,
-                                 unsigned int charcode,
+void xcomp_send_keyboard_message(xcomp_root*, uint32_t charcode,
                                  xcomp_event_data info) {
     // TODO
 }
 
+#ifdef __cplusplus
+}
+#endif
+
 #endif // XHL_COMPONENT_IMPL
-#endif // XHL_COMPONENT_H
