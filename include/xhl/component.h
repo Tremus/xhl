@@ -90,6 +90,7 @@ union xcomp_event_data
     {
         float x;
         float y;
+        uint64_t modifiers;
     };
 };
 typedef union xcomp_event_data xcomp_event_data;
@@ -166,10 +167,8 @@ xcomp_component* xcomp_find_child_at (xcomp_component*, float x, float y);
 xcomp_component* xcomp_find_parent_at (xcomp_component*, float x, float y);
 
 // APP METHODS
-void xcomp_send_mouse_message (xcomp_root*, float x, float y,
-                               xcomp_event_data info);
-void xcomp_send_keyboard_message (xcomp_root*, uint32_t charcode,
-                                  xcomp_event_data info);
+void xcomp_send_mouse_position (xcomp_root*, xcomp_event_data info);
+void xcomp_send_keyboard_message (xcomp_root*, xcomp_event_data info);
 
 #ifdef __cplusplus
 }
@@ -262,8 +261,8 @@ void xcomp_remove_child (xcomp_component* comp, xcomp_component* child)
         // try and remove child
         if (comp->children[i] == child)
         {
-            child->parent = nullptr;
-            comp->children[i] = nullptr;
+            child->parent = NULL;
+            comp->children[i] = NULL;
             child_was_removed = true;
             break;
         }
@@ -329,12 +328,17 @@ void xcomp_send_mouse_enter (xcomp_component* comp, xcomp_event_data info)
 
 void xcomp_send_mouse_exit (xcomp_component* comp, xcomp_event_data info)
 {
+    if (comp->flags & XCOMP_FLAG_IS_MOUSE_DOWN)
+    {
+        comp->flags &= ~XCOMP_FLAG_IS_MOUSE_DOWN;
+        comp->event_handler (comp, XCOMP_EVENT_MOUSE_UP, info);
+    }
+
     comp->flags &= ~XCOMP_FLAG_IS_MOUSE_OVER;
     comp->event_handler (comp, XCOMP_EVENT_MOUSE_EXIT, info);
 }
 
-void xcomp_send_mouse_message (xcomp_root* root, float x, float y,
-                               xcomp_event_data info)
+void xcomp_send_mouse_position (xcomp_root* root, xcomp_event_data info)
 {
 
     xcomp_component* last_over = root->mouse_over;
@@ -342,9 +346,9 @@ void xcomp_send_mouse_message (xcomp_root* root, float x, float y,
 
     if (last_over == NULL)
     {
-        if (xcomp_hit_test (root->main->dimensions, x, y))
+        if (xcomp_hit_test (root->main->dimensions, info.x, info.y))
         {
-            next_over = xcomp_find_child_at (root->main, x, y);
+            next_over = xcomp_find_child_at (root->main, info.x, info.y);
 
             root->mouse_over = next_over;
 
@@ -353,12 +357,11 @@ void xcomp_send_mouse_message (xcomp_root* root, float x, float y,
     }
     else
     {
-
         // check mouse still over
-        if (xcomp_hit_test (last_over->dimensions, x, y))
-            next_over = xcomp_find_child_at (last_over, x, y);
+        if (xcomp_hit_test (last_over->dimensions, info.x, info.y))
+            next_over = xcomp_find_child_at (last_over, info.x, info.y);
         else // mouse exited
-            next_over = xcomp_find_parent_at (last_over, x, y);
+            next_over = xcomp_find_parent_at (last_over, info.x, info.y);
 
         root->mouse_over = next_over;
 
@@ -381,8 +384,7 @@ void xcomp_send_mouse_message (xcomp_root* root, float x, float y,
     // TODO: handle mouse pinch
 }
 
-void xcomp_send_keyboard_message (xcomp_root*, uint32_t charcode,
-                                  xcomp_event_data info)
+void xcomp_send_keyboard_message (xcomp_root*, xcomp_event_data info)
 {
     // TODO
 }
