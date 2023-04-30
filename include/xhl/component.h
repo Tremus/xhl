@@ -95,6 +95,7 @@ typedef union xcomp_dimensions xcomp_dimensions;
 union xcomp_event_data
 {
     uint64_t raw;
+    void* ptr;
     struct
     {
         float x;
@@ -111,7 +112,7 @@ struct xcomp_component
     struct xcomp_component* parent;
     struct xcomp_component** children;
     size_t num_children;
-    size_t cap_children;
+    // size_t cap_children;
 
     uint64_t flags;
     bool (*event_handler) (struct xcomp_component*, uint32_t event,
@@ -208,7 +209,7 @@ void xcomp_init (xcomp_component* comp, void* data)
     comp->parent = NULL;
     comp->children = NULL;
     comp->num_children = 0;
-    comp->cap_children = 0;
+    // comp->cap_children = 0;
 
     comp->dimensions.x = 0.0f;
     comp->dimensions.y = 0.0f;
