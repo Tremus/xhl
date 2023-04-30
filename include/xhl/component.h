@@ -26,9 +26,16 @@ enum xcomp_event : uint32_t
     XCOMP_EVENT_MOUSE_ENTER,
     XCOMP_EVENT_MOUSE_EXIT,
     XCOMP_EVENT_MOUSE_MOVE,
-    XCOMP_EVENT_MOUSE_UP,
-    XCOMP_EVENT_MOUSE_DOWN,
-    XCOMP_EVENT_MOUSE_DOUBLE_CLICK,
+    XCOMP_EVENT_MOUSE_LEFT_DOWN,
+    XCOMP_EVENT_MOUSE_LEFT_UP,
+    XCOMP_EVENT_MOUSE_LEFT_CLICK,
+    XCOMP_EVENT_MOUSE_LEFT_DOUBLE_CLICK,
+    XCOMP_EVENT_MOUSE_RIGHT_DOWN,
+    XCOMP_EVENT_MOUSE_RIGHT_UP,
+    XCOMP_EVENT_MOUSE_RIGHT_CLICK,
+    XCOMP_EVENT_MOUSE_MIDDLE_DOWN,
+    XCOMP_EVENT_MOUSE_MIDDLE_UP,
+    XCOMP_EVENT_MOUSE_MIDDLE_CLICK,
     XCOMP_EVENT_MOUSE_DRAG,
     XCOMP_EVENT_MOUSE_DROP,
     XCOMP_EVENT_MOUSE_WHEEL,
@@ -43,10 +50,12 @@ enum xcomp_flag : uint64_t
 {
     XCOMP_FLAG_IS_HIDDEN = 1ul << 0,
     XCOMP_FLAG_IS_MOUSE_OVER = 1ul << 1,
-    XCOMP_FLAG_IS_MOUSE_DOWN = 1ul << 2,
-    XCOMP_FLAG_IS_DRAGGING = 1ul << 3,
-    XCOMP_FLAG_WANTS_KEYBOARD_FOCUS = 1ul << 4,
-    XCOMP_FLAG_OWNS_CHILDREN = 1ul << 5,
+    XCOMP_FLAG_IS_MOUSE_LEFT_DOWN = 1ul << 2,
+    XCOMP_FLAG_IS_MOUSE_MIDDLE_DOWN = 1ul << 3,
+    XCOMP_FLAG_IS_MOUSE_RIGHT_DOWN = 1ul << 4,
+    XCOMP_FLAG_IS_DRAGGING = 1ul << 5,
+    XCOMP_FLAG_WANTS_KEYBOARD_FOCUS = 1ul << 6,
+    XCOMP_FLAG_OWNS_CHILDREN = 1ul << 7,
 };
 
 enum xcomp_modifier : uint64_t
@@ -117,6 +126,9 @@ struct xcomp_root
 {
     xcomp_component* main; // root level component
     xcomp_component* mouse_over;
+    xcomp_component* mouse_left_down;
+    xcomp_component* mouse_right_down;
+    xcomp_component* mouse_middle_down;
     xcomp_component* keyboard_focus;
 };
 typedef struct xcomp_root xcomp_root;
@@ -168,6 +180,8 @@ xcomp_component* xcomp_find_parent_at (xcomp_component*, float x, float y);
 
 // APP METHODS
 void xcomp_send_mouse_position (xcomp_root*, xcomp_event_data info);
+void xcomp_send_mouse_down (xcomp_root*, xcomp_event_data info);
+void xcomp_send_mouse_up (xcomp_root*, xcomp_event_data info);
 void xcomp_send_keyboard_message (xcomp_root*, xcomp_event_data info);
 
 #ifdef __cplusplus
@@ -328,10 +342,20 @@ void xcomp_send_mouse_enter (xcomp_component* comp, xcomp_event_data info)
 
 void xcomp_send_mouse_exit (xcomp_component* comp, xcomp_event_data info)
 {
-    if (comp->flags & XCOMP_FLAG_IS_MOUSE_DOWN)
+    if (comp->flags & XCOMP_EVENT_MOUSE_LEFT_DOWN)
     {
-        comp->flags &= ~XCOMP_FLAG_IS_MOUSE_DOWN;
-        comp->event_handler (comp, XCOMP_EVENT_MOUSE_UP, info);
+        comp->flags &= ~XCOMP_EVENT_MOUSE_LEFT_DOWN;
+        comp->event_handler (comp, XCOMP_EVENT_MOUSE_LEFT_UP, info);
+    }
+    if (comp->flags & XCOMP_EVENT_MOUSE_RIGHT_DOWN)
+    {
+        comp->flags &= ~XCOMP_EVENT_MOUSE_RIGHT_DOWN;
+        comp->event_handler (comp, XCOMP_EVENT_MOUSE_RIGHT_UP, info);
+    }
+    if (comp->flags & XCOMP_EVENT_MOUSE_MIDDLE_DOWN)
+    {
+        comp->flags &= ~XCOMP_EVENT_MOUSE_MIDDLE_DOWN;
+        comp->event_handler (comp, XCOMP_EVENT_MOUSE_MIDDLE_UP, info);
     }
 
     comp->flags &= ~XCOMP_FLAG_IS_MOUSE_OVER;
@@ -340,7 +364,6 @@ void xcomp_send_mouse_exit (xcomp_component* comp, xcomp_event_data info)
 
 void xcomp_send_mouse_position (xcomp_root* root, xcomp_event_data info)
 {
-
     xcomp_component* last_over = root->mouse_over;
     xcomp_component* next_over = NULL;
 
@@ -382,6 +405,99 @@ void xcomp_send_mouse_position (xcomp_root* root, xcomp_event_data info)
     // TODO: handle mouse down
     // TODO: handle mouse wheel
     // TODO: handle mouse pinch
+}
+
+void xcomp_send_mouse_down (xcomp_root* root, xcomp_event_data info)
+{
+    xcomp_component* comp = xcomp_find_child_at (root->main, info.x, info.y);
+    if (comp != NULL)
+    {
+        // handle left button
+        if ((info.modifiers & XCOMP_MOD_LEFT_BUTTON) &&
+            root->mouse_left_down == NULL)
+        {
+            root->mouse_left_down = comp;
+            comp->flags |= XCOMP_FLAG_IS_MOUSE_LEFT_DOWN;
+            comp->event_handler (comp, XCOMP_EVENT_MOUSE_LEFT_DOWN, info);
+        }
+
+        // handle right button
+        if ((info.modifiers & XCOMP_MOD_RIGHT_BUTTON) &&
+            root->mouse_right_down == NULL)
+        {
+            root->mouse_right_down = comp;
+            comp->flags |= XCOMP_FLAG_IS_MOUSE_RIGHT_DOWN;
+            comp->event_handler (comp, XCOMP_EVENT_MOUSE_RIGHT_DOWN, info);
+        }
+
+        // handle middle button
+        if ((info.modifiers & XCOMP_MOD_MIDDLE_BUTTON) &&
+            root->mouse_middle_down == NULL)
+        {
+            root->mouse_middle_down = comp;
+            comp->flags |= XCOMP_FLAG_IS_MOUSE_MIDDLE_DOWN;
+            comp->event_handler (comp, XCOMP_EVENT_MOUSE_MIDDLE_DOWN, info);
+        }
+    }
+}
+
+void xcomp_send_mouse_up (xcomp_root* root, xcomp_event_data info)
+{
+    xcomp_component* comp = xcomp_find_child_at (root->main, info.x, info.y);
+
+    // handle left button
+    if ((info.modifiers & XCOMP_MOD_LEFT_BUTTON) &&
+        root->mouse_left_down != NULL)
+    {
+        xcomp_component* last_comp = root->mouse_left_down;
+
+        root->mouse_left_down = NULL;
+        last_comp->flags &= ~XCOMP_FLAG_IS_MOUSE_LEFT_DOWN;
+        last_comp->event_handler (last_comp, XCOMP_EVENT_MOUSE_LEFT_UP, info);
+
+        if (last_comp == comp)
+        {
+            last_comp->event_handler (last_comp, XCOMP_EVENT_MOUSE_LEFT_CLICK,
+                                      info);
+            // TODO: record time and component in case of a double click
+        }
+    }
+
+    // handle right button
+    if ((info.modifiers & XCOMP_MOD_RIGHT_BUTTON) &&
+        root->mouse_right_down != NULL)
+    {
+        xcomp_component* last_comp = root->mouse_right_down;
+
+        root->mouse_right_down = NULL;
+        last_comp->flags &= ~XCOMP_FLAG_IS_MOUSE_RIGHT_DOWN;
+        last_comp->event_handler (last_comp, XCOMP_EVENT_MOUSE_RIGHT_UP, info);
+
+        if (last_comp == comp)
+        {
+            // We probably don't care about right double clicks
+            last_comp->event_handler (last_comp, XCOMP_EVENT_MOUSE_RIGHT_CLICK,
+                                      info);
+        }
+    }
+
+    // handle middle button
+    if ((info.modifiers & XCOMP_MOD_MIDDLE_BUTTON) &&
+        root->mouse_middle_down != NULL)
+    {
+        xcomp_component* last_comp = root->mouse_middle_down;
+
+        root->mouse_middle_down = NULL;
+        last_comp->flags &= ~XCOMP_FLAG_IS_MOUSE_MIDDLE_DOWN;
+        last_comp->event_handler (last_comp, XCOMP_EVENT_MOUSE_MIDDLE_UP, info);
+
+        if (last_comp == comp)
+        {
+            // We probably don't care about middle double clicks
+            last_comp->event_handler (last_comp, XCOMP_EVENT_MOUSE_MIDDLE_CLICK,
+                                      info);
+        }
+    }
 }
 
 void xcomp_send_keyboard_message (xcomp_root*, xcomp_event_data info)
