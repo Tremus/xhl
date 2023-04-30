@@ -343,23 +343,24 @@ void xcomp_send_mouse_enter (xcomp_component* comp, xcomp_event_data info)
 
 void xcomp_send_mouse_exit (xcomp_component* comp, xcomp_event_data info)
 {
-    if (comp->flags & XCOMP_EVENT_MOUSE_LEFT_DOWN)
+    comp->flags &= ~XCOMP_FLAG_IS_MOUSE_OVER;
+
+    if (comp->flags & XCOMP_FLAG_IS_MOUSE_LEFT_DOWN)
     {
-        comp->flags &= ~XCOMP_EVENT_MOUSE_LEFT_DOWN;
+        comp->flags &= ~XCOMP_FLAG_IS_MOUSE_LEFT_DOWN;
         comp->event_handler (comp, XCOMP_EVENT_MOUSE_LEFT_UP, info);
     }
-    if (comp->flags & XCOMP_EVENT_MOUSE_RIGHT_DOWN)
+    if (comp->flags & XCOMP_FLAG_IS_MOUSE_RIGHT_DOWN)
     {
-        comp->flags &= ~XCOMP_EVENT_MOUSE_RIGHT_DOWN;
+        comp->flags &= ~XCOMP_FLAG_IS_MOUSE_RIGHT_DOWN;
         comp->event_handler (comp, XCOMP_EVENT_MOUSE_RIGHT_UP, info);
     }
-    if (comp->flags & XCOMP_EVENT_MOUSE_MIDDLE_DOWN)
+    if (comp->flags & XCOMP_FLAG_IS_MOUSE_MIDDLE_DOWN)
     {
-        comp->flags &= ~XCOMP_EVENT_MOUSE_MIDDLE_DOWN;
+        comp->flags &= ~XCOMP_FLAG_IS_MOUSE_MIDDLE_DOWN;
         comp->event_handler (comp, XCOMP_EVENT_MOUSE_MIDDLE_UP, info);
     }
 
-    comp->flags &= ~XCOMP_FLAG_IS_MOUSE_OVER;
     comp->event_handler (comp, XCOMP_EVENT_MOUSE_EXIT, info);
 }
 
@@ -451,10 +452,14 @@ void xcomp_send_mouse_up (xcomp_root* root, xcomp_event_data info)
         root->mouse_left_down != NULL)
     {
         xcomp_component* last_comp = root->mouse_left_down;
-
         root->mouse_left_down = NULL;
-        last_comp->flags &= ~XCOMP_FLAG_IS_MOUSE_LEFT_DOWN;
-        last_comp->event_handler (last_comp, XCOMP_EVENT_MOUSE_LEFT_UP, info);
+
+        if (last_comp->flags & XCOMP_FLAG_IS_MOUSE_LEFT_DOWN)
+        {
+            last_comp->flags &= ~XCOMP_FLAG_IS_MOUSE_LEFT_DOWN;
+            last_comp->event_handler (last_comp, XCOMP_EVENT_MOUSE_LEFT_UP,
+                                      info);
+        }
 
         if (last_comp == comp)
         {
@@ -469,10 +474,14 @@ void xcomp_send_mouse_up (xcomp_root* root, xcomp_event_data info)
         root->mouse_right_down != NULL)
     {
         xcomp_component* last_comp = root->mouse_right_down;
-
         root->mouse_right_down = NULL;
-        last_comp->flags &= ~XCOMP_FLAG_IS_MOUSE_RIGHT_DOWN;
-        last_comp->event_handler (last_comp, XCOMP_EVENT_MOUSE_RIGHT_UP, info);
+
+        if (last_comp->flags & XCOMP_FLAG_IS_MOUSE_RIGHT_DOWN)
+        {
+            last_comp->flags &= ~XCOMP_FLAG_IS_MOUSE_RIGHT_DOWN;
+            last_comp->event_handler (last_comp, XCOMP_EVENT_MOUSE_RIGHT_UP,
+                                      info);
+        }
 
         if (last_comp == comp)
         {
@@ -487,10 +496,14 @@ void xcomp_send_mouse_up (xcomp_root* root, xcomp_event_data info)
         root->mouse_middle_down != NULL)
     {
         xcomp_component* last_comp = root->mouse_middle_down;
-
         root->mouse_middle_down = NULL;
-        last_comp->flags &= ~XCOMP_FLAG_IS_MOUSE_MIDDLE_DOWN;
-        last_comp->event_handler (last_comp, XCOMP_EVENT_MOUSE_MIDDLE_UP, info);
+
+        if (last_comp->flags & XCOMP_FLAG_IS_MOUSE_MIDDLE_DOWN)
+        {
+            last_comp->flags &= ~XCOMP_FLAG_IS_MOUSE_MIDDLE_DOWN;
+            last_comp->event_handler (last_comp, XCOMP_EVENT_MOUSE_MIDDLE_UP,
+                                      info);
+        }
 
         if (last_comp == comp)
         {
