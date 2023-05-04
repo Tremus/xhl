@@ -130,13 +130,16 @@ struct xcomp_root
     // Main is your root level component
     xcomp_component* main;
     // These hold state of basic mouse & keyboard events
-    // Before hiding or deleting any component, xcomp_root_clear
-    // should be called to clean up any events and 0 the pointers
+    // To keep this state clean, call xcomp_root_clear()
+    // BEFORE you DELETE any component or AFTER you change
+    // the VISIBILITY of a component
+    // See @xcomp_root_clear()
     xcomp_component* mouse_over;
     xcomp_component* mouse_left_down;
     xcomp_component* mouse_right_down;
     xcomp_component* mouse_middle_down;
     xcomp_component* keyboard_focus;
+
     xcomp_position position;
 };
 typedef struct xcomp_root xcomp_root;
@@ -185,6 +188,7 @@ void xcomp_send_mouse_down(xcomp_root*, xcomp_event_data info);
 void xcomp_send_mouse_up(xcomp_root*, xcomp_event_data info);
 void xcomp_send_keyboard_message(xcomp_root*, xcomp_event_data info);
 // Call this before any component gets deleted to 0 any dangling pointers
+// Call this after the visibility of any component changes
 void xcomp_root_clear(xcomp_root*);
 
 // INLINE IMPLEMENTATIONS
@@ -213,17 +217,9 @@ bool xcomp_is_hidden(xcomp_component* comp)
 // #define XHL_COMPONENT_IMPL
 #ifdef XHL_COMPONENT_IMPL
 
-#ifndef XCOMP_INITIAL_CHILDREN_CAP
-#define XCOMP_INITIAL_CHILDREN_CAP 8
-#endif
-
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-// #include <stdio.h>
-// #include <stdlib.h>
-// #include <string.h>
 
 void xcomp_send_mouse_exit(xcomp_component* comp, xcomp_event_data info);
 
