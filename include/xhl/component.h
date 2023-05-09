@@ -150,6 +150,7 @@ typedef struct xcomp_root xcomp_root;
 inline bool xcomp_is_empty(xcomp_dimensions d);
 // Check coordinate lies within dimensions
 inline bool xcomp_hit_test(xcomp_dimensions d, xcomp_position pos);
+inline xcomp_position xcomp_centre(xcomp_dimensions d);
 
 // COMPONENT METHODS
 
@@ -203,6 +204,11 @@ bool xcomp_hit_test(xcomp_dimensions d, xcomp_position pos)
     float r = d.x + d.width;
     float b = d.y + d.height;
     return pos.x >= d.x && pos.y >= d.y && pos.x <= r && pos.y <= b;
+}
+
+xcomp_position xcomp_centre(xcomp_dimensions d)
+{
+    return {.data = {0.5f * d.width + d.x, 0.5f * d.height + d.y}};
 }
 
 bool xcomp_is_hidden(xcomp_component* comp)
