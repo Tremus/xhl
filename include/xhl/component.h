@@ -116,7 +116,7 @@ struct xcomp_component
     // size_t cap_children;
 
     uint64_t flags;
-    bool (*event_handler)(struct xcomp_component*, uint32_t event,
+    void (*event_handler)(struct xcomp_component*, uint32_t event,
                           xcomp_event_data data);
 
     // Keep a ptr to your data here
@@ -155,7 +155,7 @@ inline bool xcomp_hit_test(xcomp_dimensions d, xcomp_position pos);
 
 void xcomp_init(xcomp_component* comp, void* data);
 
-bool xcomp_empty_event_cb(xcomp_component*, uint32_t, xcomp_event_data);
+void xcomp_empty_event_cb(xcomp_component*, uint32_t, xcomp_event_data);
 
 // set x/y/w/h on component, then send event
 void xcomp_set_dimensions(xcomp_component* comp, xcomp_dimensions dimensions);
@@ -240,10 +240,7 @@ void xcomp_init(xcomp_component* comp, void* data)
     comp->data          = data;
 }
 
-bool xcomp_empty_event_cb(xcomp_component*, uint32_t, xcomp_event_data)
-{
-    return true;
-}
+void xcomp_empty_event_cb(xcomp_component*, uint32_t, xcomp_event_data) {}
 
 void xcomp_set_dimensions(xcomp_component* comp, xcomp_dimensions dimensions)
 {
