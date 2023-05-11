@@ -116,8 +116,10 @@ struct xcomp_component
     // size_t cap_children;
 
     uint64_t flags;
-    void (*event_handler)(struct xcomp_component*, uint32_t event,
-                          xcomp_event_data data);
+    void (*event_handler)(
+        struct xcomp_component*,
+        uint32_t event,
+        xcomp_event_data data);
 
     // Keep a ptr to your data here
     void* data;
@@ -485,14 +487,18 @@ void xcomp_send_mouse_up(xcomp_root* root, xcomp_event_data info)
         if (last_comp->flags & XCOMP_FLAG_IS_MOUSE_LEFT_DOWN)
         {
             last_comp->flags &= ~XCOMP_FLAG_IS_MOUSE_LEFT_DOWN;
-            last_comp->event_handler(last_comp, XCOMP_EVENT_MOUSE_LEFT_UP,
-                                     info);
+            last_comp->event_handler(
+                last_comp,
+                XCOMP_EVENT_MOUSE_LEFT_UP,
+                info);
         }
 
         if (last_comp == comp)
         {
-            last_comp->event_handler(last_comp, XCOMP_EVENT_MOUSE_LEFT_CLICK,
-                                     info);
+            last_comp->event_handler(
+                last_comp,
+                XCOMP_EVENT_MOUSE_LEFT_CLICK,
+                info);
             // TODO: record time and component in case of a double click
         }
     }
@@ -507,15 +513,19 @@ void xcomp_send_mouse_up(xcomp_root* root, xcomp_event_data info)
         if (last_comp->flags & XCOMP_FLAG_IS_MOUSE_RIGHT_DOWN)
         {
             last_comp->flags &= ~XCOMP_FLAG_IS_MOUSE_RIGHT_DOWN;
-            last_comp->event_handler(last_comp, XCOMP_EVENT_MOUSE_RIGHT_UP,
-                                     info);
+            last_comp->event_handler(
+                last_comp,
+                XCOMP_EVENT_MOUSE_RIGHT_UP,
+                info);
         }
 
         if (last_comp == comp)
         {
             // We probably don't care about right double clicks
-            last_comp->event_handler(last_comp, XCOMP_EVENT_MOUSE_RIGHT_CLICK,
-                                     info);
+            last_comp->event_handler(
+                last_comp,
+                XCOMP_EVENT_MOUSE_RIGHT_CLICK,
+                info);
         }
     }
 
@@ -529,15 +539,19 @@ void xcomp_send_mouse_up(xcomp_root* root, xcomp_event_data info)
         if (last_comp->flags & XCOMP_FLAG_IS_MOUSE_MIDDLE_DOWN)
         {
             last_comp->flags &= ~XCOMP_FLAG_IS_MOUSE_MIDDLE_DOWN;
-            last_comp->event_handler(last_comp, XCOMP_EVENT_MOUSE_MIDDLE_UP,
-                                     info);
+            last_comp->event_handler(
+                last_comp,
+                XCOMP_EVENT_MOUSE_MIDDLE_UP,
+                info);
         }
 
         if (last_comp == comp)
         {
             // We probably don't care about middle double clicks
-            last_comp->event_handler(last_comp, XCOMP_EVENT_MOUSE_MIDDLE_CLICK,
-                                     info);
+            last_comp->event_handler(
+                last_comp,
+                XCOMP_EVENT_MOUSE_MIDDLE_CLICK,
+                info);
         }
     }
 }
@@ -555,7 +569,9 @@ void xcomp_root_clear(xcomp_root* root)
     xcomp_component* last_mouse_middle_down = root->mouse_middle_down;
     xcomp_component* last_keyboard_focus    = root->keyboard_focus;
     xcomp_event_data edata                  = {
-                         .x = root->position.x, .y = root->position.y, .modifiers = 0};
+                         .x         = root->position.x,
+                         .y         = root->position.y,
+                         .modifiers = 0};
 
     root->mouse_over        = NULL;
     root->mouse_left_down   = NULL;
@@ -566,31 +582,37 @@ void xcomp_root_clear(xcomp_root* root)
     if (last_keyboard_focus != NULL)
     {
         last_keyboard_focus->flags &= ~XCOMP_FLAG_HAS_KEYBOARD_FOCUS;
-        last_keyboard_focus->event_handler(last_keyboard_focus,
-                                           XCOMP_EVENT_KEYBOARD_FOCUS_CHANGED,
-                                           {.raw = 0});
+        last_keyboard_focus->event_handler(
+            last_keyboard_focus,
+            XCOMP_EVENT_KEYBOARD_FOCUS_CHANGED,
+            {.raw = 0});
     }
 
     if (last_mouse_middle_down != NULL)
     {
         last_mouse_middle_down->flags &= ~XCOMP_FLAG_IS_MOUSE_MIDDLE_DOWN;
-        last_mouse_middle_down->event_handler(last_mouse_middle_down,
-                                              XCOMP_FLAG_IS_MOUSE_MIDDLE_DOWN,
-                                              {.raw = 0});
+        last_mouse_middle_down->event_handler(
+            last_mouse_middle_down,
+            XCOMP_EVENT_MOUSE_MIDDLE_UP,
+            {.raw = 0});
     }
 
     if (last_mouse_right_down != NULL)
     {
         last_mouse_right_down->flags &= ~XCOMP_FLAG_IS_MOUSE_RIGHT_DOWN;
         last_mouse_right_down->event_handler(
-            last_mouse_right_down, XCOMP_FLAG_IS_MOUSE_RIGHT_DOWN, {.raw = 0});
+            last_mouse_right_down,
+            XCOMP_EVENT_MOUSE_RIGHT_UP,
+            {.raw = 0});
     }
 
     if (last_mouse_left_down != NULL)
     {
         last_mouse_left_down->flags &= ~XCOMP_FLAG_IS_MOUSE_LEFT_DOWN;
         last_mouse_left_down->event_handler(
-            last_mouse_left_down, XCOMP_FLAG_IS_MOUSE_LEFT_DOWN, {.raw = 0});
+            last_mouse_left_down,
+            XCOMP_EVENT_MOUSE_LEFT_UP,
+            {.raw = 0});
     }
 
     if (last_mouse_over != NULL)
