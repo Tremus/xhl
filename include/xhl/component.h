@@ -231,6 +231,43 @@ extern "C" {
 
 void xcomp_send_mouse_exit(xcomp_component* comp, xcomp_event_data info);
 
+void xcomp_root_give_keyboard_focus(
+    xcomp_root* root,
+    xcomp_component* next_comp)
+{
+    xcomp_component* last_comp = root->keyboard_focus;
+    xcomp_event_data edata;
+    edata.x         = root->position.x;
+    edata.y         = root->position.y;
+    edata.modifiers = 0;
+
+    root->keyboard_focus = NULL;
+    if (last_comp != NULL &&
+        (last_comp->flags & XCOMP_FLAG_HAS_KEYBOARD_FOCUS) ==
+            XCOMP_FLAG_HAS_KEYBOARD_FOCUS)
+    {
+        last_comp->flags &= ~XCOMP_FLAG_HAS_KEYBOARD_FOCUS;
+        last_comp->event_handler(
+            last_comp,
+            XCOMP_EVENT_KEYBOARD_FOCUS_CHANGED,
+            edata);
+    }
+
+    // check should take keyboard focus
+    if (next_comp != NULL &&
+        (next_comp->flags & XCOMP_FLAG_WANTS_KEYBOARD_FOCUS) ==
+            XCOMP_FLAG_WANTS_KEYBOARD_FOCUS &&
+        (next_comp->flags & XCOMP_FLAG_HAS_KEYBOARD_FOCUS) !=
+            XCOMP_FLAG_HAS_KEYBOARD_FOCUS)
+    {
+        next_comp->flags |= XCOMP_FLAG_HAS_KEYBOARD_FOCUS;
+        next_comp->event_handler(
+            next_comp,
+            XCOMP_EVENT_KEYBOARD_FOCUS_CHANGED,
+            edata);
+    }
+}
+
 void xcomp_init(xcomp_component* comp, void* data)
 {
     comp->parent       = NULL;
@@ -450,6 +487,9 @@ void xcomp_send_mouse_down(xcomp_root* root, xcomp_event_data info)
         {
             root->mouse_left_down = comp;
             comp->flags |= XCOMP_FLAG_IS_MOUSE_LEFT_DOWN;
+
+            xcomp_root_give_keyboard_focus(root, comp);
+
             comp->event_handler(comp, XCOMP_EVENT_MOUSE_LEFT_DOWN, info);
         }
 
@@ -459,6 +499,9 @@ void xcomp_send_mouse_down(xcomp_root* root, xcomp_event_data info)
         {
             root->mouse_right_down = comp;
             comp->flags |= XCOMP_FLAG_IS_MOUSE_RIGHT_DOWN;
+
+            xcomp_root_give_keyboard_focus(root, comp);
+
             comp->event_handler(comp, XCOMP_EVENT_MOUSE_RIGHT_DOWN, info);
         }
 
@@ -468,6 +511,9 @@ void xcomp_send_mouse_down(xcomp_root* root, xcomp_event_data info)
         {
             root->mouse_middle_down = comp;
             comp->flags |= XCOMP_FLAG_IS_MOUSE_MIDDLE_DOWN;
+
+            xcomp_root_give_keyboard_focus(root, comp);
+
             comp->event_handler(comp, XCOMP_EVENT_MOUSE_MIDDLE_DOWN, info);
         }
     }
@@ -577,16 +623,8 @@ void xcomp_root_clear(xcomp_root* root)
     root->mouse_left_down   = NULL;
     root->mouse_right_down  = NULL;
     root->mouse_middle_down = NULL;
-    root->keyboard_focus    = NULL;
 
-    if (last_keyboard_focus != NULL)
-    {
-        last_keyboard_focus->flags &= ~XCOMP_FLAG_HAS_KEYBOARD_FOCUS;
-        last_keyboard_focus->event_handler(
-            last_keyboard_focus,
-            XCOMP_EVENT_KEYBOARD_FOCUS_CHANGED,
-            {.raw = 0});
-    }
+    xcomp_root_give_keyboard_focus(root, NULL);
 
     if (last_mouse_middle_down != NULL)
     {
@@ -594,7 +632,7 @@ void xcomp_root_clear(xcomp_root* root)
         last_mouse_middle_down->event_handler(
             last_mouse_middle_down,
             XCOMP_EVENT_MOUSE_MIDDLE_UP,
-            {.raw = 0});
+            edata);
     }
 
     if (last_mouse_right_down != NULL)
@@ -603,7 +641,7 @@ void xcomp_root_clear(xcomp_root* root)
         last_mouse_right_down->event_handler(
             last_mouse_right_down,
             XCOMP_EVENT_MOUSE_RIGHT_UP,
-            {.raw = 0});
+            edata);
     }
 
     if (last_mouse_left_down != NULL)
@@ -612,7 +650,7 @@ void xcomp_root_clear(xcomp_root* root)
         last_mouse_left_down->event_handler(
             last_mouse_left_down,
             XCOMP_EVENT_MOUSE_LEFT_UP,
-            {.raw = 0});
+            edata);
     }
 
     if (last_mouse_over != NULL)
