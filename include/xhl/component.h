@@ -241,7 +241,7 @@ void xcomp_root_give_keyboard_focus(
     edata.y         = root->position.y;
     edata.modifiers = 0;
 
-    root->keyboard_focus = NULL;
+    root->keyboard_focus = next_comp;
     if (last_comp != NULL &&
         (last_comp->flags & XCOMP_FLAG_HAS_KEYBOARD_FOCUS) ==
             XCOMP_FLAG_HAS_KEYBOARD_FOCUS)
