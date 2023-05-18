@@ -150,6 +150,8 @@ typedef struct xcomp_root xcomp_root;
 
 // Check is not all 0s
 inline bool xcomp_is_empty(xcomp_dimensions d);
+// Check mod flags for a popup menu
+inline bool xcomp_is_popup_menu(uint64_t mods);
 // Check coordinate lies within dimensions
 inline bool xcomp_hit_test(xcomp_dimensions d, xcomp_position pos);
 inline xcomp_position xcomp_centre(xcomp_dimensions d);
@@ -199,6 +201,16 @@ void xcomp_root_clear(xcomp_root*);
 bool xcomp_is_empty(xcomp_dimensions d)
 {
     return d.width == 0.0f || d.height == 0.0f;
+}
+
+bool xcomp_is_popup_menu(uint64_t mods)
+{
+    return
+#ifdef __APPLE__
+        ((mods & (XCOMP_MOD_CTRL_BUTTON | XCOMP_MOD_LEFT_BUTTON)) ==
+         (XCOMP_MOD_CTRL_BUTTON | XCOMP_MOD_LEFT_BUTTON)) ||
+#endif
+        (mods & XCOMP_MOD_RIGHT_BUTTON);
 }
 
 bool xcomp_hit_test(xcomp_dimensions d, xcomp_position pos)
