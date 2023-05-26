@@ -22,6 +22,7 @@ enum xcomp_event : uint32_t
     XCOMP_EVENT_SIZE_CHANGED,
     XCOMP_EVENT_DIMENSION_CHANGED,
     XCOMP_EVENT_VISIBILITY_CHANGED,
+    XCOMP_EVENT_ENABLEMENT_CHANGED,
     // mouse
     XCOMP_EVENT_MOUSE_ENTER,
     XCOMP_EVENT_MOUSE_EXIT,
@@ -57,6 +58,7 @@ enum xcomp_flag : uint64_t
     XCOMP_FLAG_WANTS_KEYBOARD_FOCUS = 1 << 6,
     XCOMP_FLAG_HAS_KEYBOARD_FOCUS   = 1 << 7,
     XCOMP_FLAG_OWNS_CHILDREN        = 1 << 8,
+    XCOMP_FLAG_IS_DISABLED          = 1 << 9,
 };
 
 enum xcomp_modifier : uint64_t
@@ -173,8 +175,12 @@ void xcomp_add_child(xcomp_component* comp, xcomp_component* child);
 // resizes num children
 void xcomp_remove_child(xcomp_component* comp, xcomp_component* child);
 // set flag, send event
+// You should call xcomp_root_clear() after using this!
 void xcomp_set_visible(xcomp_component* comp, bool visible);
+// You should call xcomp_root_clear() after using this!
+void xcomp_set_enabled(xcomp_component* comp, bool enabled);
 inline bool xcomp_is_hidden(xcomp_component*);
+inline bool xcomp_is_enabled(xcomp_component*);
 // checks through parent heirarchy until it finds the root
 xcomp_component* xcomp_get_root_component(xcomp_component* comp);
 
@@ -192,8 +198,10 @@ void xcomp_send_mouse_position(xcomp_root*, xcomp_event_data info);
 void xcomp_send_mouse_down(xcomp_root*, xcomp_event_data info);
 void xcomp_send_mouse_up(xcomp_root*, xcomp_event_data info);
 void xcomp_send_keyboard_message(xcomp_root*, xcomp_event_data info);
+// This will flush and update the properties of xcomp_root
 // Call this before any component gets deleted to 0 any dangling pointers
 // Call this after the visibility of any component changes
+// Call this after enabling / disabling any components
 void xcomp_root_clear(xcomp_root*);
 
 // INLINE IMPLEMENTATIONS
@@ -228,6 +236,11 @@ xcomp_position xcomp_centre(xcomp_dimensions d)
 bool xcomp_is_hidden(xcomp_component* comp)
 {
     return (comp->flags & XCOMP_FLAG_IS_HIDDEN) == XCOMP_FLAG_IS_HIDDEN;
+}
+
+bool xcomp_is_enabled(xcomp_component* comp)
+{
+    return (comp->flags & XCOMP_FLAG_IS_DISABLED) != XCOMP_FLAG_IS_DISABLED;
 }
 
 #ifdef __cplusplus
@@ -282,17 +295,8 @@ void xcomp_root_give_keyboard_focus(
 
 void xcomp_init(xcomp_component* comp, void* data)
 {
-    comp->parent       = NULL;
-    comp->children     = NULL;
-    comp->num_children = 0;
-    // comp->cap_children = 0;
+    memset(comp, 0, sizeof(*comp));
 
-    comp->dimensions.x      = 0.0f;
-    comp->dimensions.y      = 0.0f;
-    comp->dimensions.width  = 0.0f;
-    comp->dimensions.height = 0.0f;
-
-    comp->flags         = 0;
     comp->event_handler = &xcomp_empty_event_cb;
     comp->data          = data;
 }
@@ -368,13 +372,32 @@ void xcomp_remove_child(xcomp_component* comp, xcomp_component* child)
 
 void xcomp_set_visible(xcomp_component* comp, bool visible)
 {
+    uint64_t prev_flags = comp->flags;
     if (visible)
         comp->flags &= ~XCOMP_FLAG_IS_HIDDEN;
     else
         comp->flags |= XCOMP_FLAG_IS_HIDDEN;
 
-    xcomp_event_data data = {.raw = visible};
-    comp->event_handler(comp, XCOMP_EVENT_VISIBILITY_CHANGED, data);
+    if (prev_flags != comp->flags)
+    {
+        xcomp_event_data data = {.raw = visible};
+        comp->event_handler(comp, XCOMP_EVENT_VISIBILITY_CHANGED, data);
+    }
+}
+
+void xcomp_set_enabled(xcomp_component* comp, bool enabled)
+{
+    uint64_t prev_flags = comp->flags;
+    if (enabled)
+        comp->flags &= ~XCOMP_FLAG_IS_DISABLED;
+    else
+        comp->flags |= XCOMP_FLAG_IS_DISABLED;
+
+    if (prev_flags != comp->flags)
+    {
+        xcomp_event_data data = {.raw = enabled};
+        comp->event_handler(comp, XCOMP_EVENT_ENABLEMENT_CHANGED, data);
+    }
 }
 
 xcomp_component* xcomp_get_root_component(xcomp_component* comp)
@@ -394,7 +417,8 @@ xcomp_component* xcomp_find_child_at(xcomp_component* comp, xcomp_position p)
         xcomp_component* child = comp->children[i];
 
         // if visible and mouse within dimensions
-        if (xcomp_is_hidden(child) == false &&
+        if (! ((child->flags &
+                (XCOMP_FLAG_IS_HIDDEN | XCOMP_FLAG_IS_DISABLED)) != 0) &&
             xcomp_hit_test(child->dimensions, p))
             return xcomp_find_child_at(child, p);
     }
