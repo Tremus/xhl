@@ -82,6 +82,17 @@ union xcomp_position
 };
 typedef union xcomp_position xcomp_position;
 
+union xcomp_size
+{
+    struct
+    {
+        float width;
+        float height;
+    };
+    float data[2]; // vec2
+};
+typedef union xcomp_size xcomp_size;
+
 union xcomp_dimensions
 {
     struct
@@ -90,6 +101,11 @@ union xcomp_dimensions
         float y;
         float width;
         float height;
+    };
+    struct
+    {
+        xcomp_position position;
+        xcomp_size size;
     };
     float data[4]; // vec4
 };
