@@ -214,6 +214,8 @@ void xcomp_send_mouse_position(xcomp_root*, xcomp_event_data info);
 void xcomp_send_mouse_down(xcomp_root*, xcomp_event_data info);
 void xcomp_send_mouse_up(xcomp_root*, xcomp_event_data info);
 void xcomp_send_keyboard_message(xcomp_root*, xcomp_event_data info);
+// set component to NULL to remove focus
+void xcomp_root_give_keyboard_focus(xcomp_root*, xcomp_component* comp);
 // This will flush and update the properties of xcomp_root
 // Call this before any component gets deleted to 0 any dangling pointers
 // Call this after the visibility of any component changes
