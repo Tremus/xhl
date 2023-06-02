@@ -542,7 +542,8 @@ void xcomp_send_mouse_down(xcomp_root* root, xcomp_event_data info)
             root->mouse_left_down = comp;
             comp->flags |= XCOMP_FLAG_IS_MOUSE_LEFT_DOWN;
 
-            xcomp_root_give_keyboard_focus(root, comp);
+            if (comp->flags & XCOMP_FLAG_WANTS_KEYBOARD_FOCUS)
+                xcomp_root_give_keyboard_focus(root, comp);
 
             comp->event_handler(comp, XCOMP_EVENT_MOUSE_LEFT_DOWN, info);
         }
@@ -554,7 +555,8 @@ void xcomp_send_mouse_down(xcomp_root* root, xcomp_event_data info)
             root->mouse_right_down = comp;
             comp->flags |= XCOMP_FLAG_IS_MOUSE_RIGHT_DOWN;
 
-            xcomp_root_give_keyboard_focus(root, comp);
+            if (comp->flags & XCOMP_FLAG_WANTS_KEYBOARD_FOCUS)
+                xcomp_root_give_keyboard_focus(root, comp);
 
             comp->event_handler(comp, XCOMP_EVENT_MOUSE_RIGHT_DOWN, info);
         }
@@ -566,7 +568,8 @@ void xcomp_send_mouse_down(xcomp_root* root, xcomp_event_data info)
             root->mouse_middle_down = comp;
             comp->flags |= XCOMP_FLAG_IS_MOUSE_MIDDLE_DOWN;
 
-            xcomp_root_give_keyboard_focus(root, comp);
+            if (comp->flags & XCOMP_FLAG_WANTS_KEYBOARD_FOCUS)
+                xcomp_root_give_keyboard_focus(root, comp);
 
             comp->event_handler(comp, XCOMP_EVENT_MOUSE_MIDDLE_DOWN, info);
         }
