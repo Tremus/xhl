@@ -69,6 +69,12 @@ enum xcomp_modifier : uint64_t
     XCOMP_MOD_CTRL_BUTTON   = 1 << 3,
     XCOMP_MOD_ALT_BUTTON    = 1 << 4,
     XCOMP_MOD_SHIFT_BUTTON  = 1 << 5,
+    // Flag set when using 2+ finger gestures on Apple devices
+    // See: [NSEvent hasPreciseScrollingDeltas]
+    XCOMP_MOD_PRECISE_SCROLL = 1 << 6,
+    // Flag set when touch events are inverted on Apple devices
+    // See: [NSEvent isDirectionInvertedFromDevice]
+    XCOMP_MOD_INVERTED_SCROLL = 1 << 7,
 };
 
 union xcomp_position
