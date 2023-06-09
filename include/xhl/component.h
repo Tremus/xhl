@@ -56,17 +56,18 @@ enum xcomp_event : uint32_t
 
 enum xcomp_flag : uint64_t
 {
-    XCOMP_FLAG_IS_HIDDEN            = 1 << 0,
-    XCOMP_FLAG_IS_MOUSE_OVER        = 1 << 1,
-    XCOMP_FLAG_IS_MOUSE_LEFT_DOWN   = 1 << 2,
-    XCOMP_FLAG_IS_MOUSE_MIDDLE_DOWN = 1 << 3,
-    XCOMP_FLAG_IS_MOUSE_RIGHT_DOWN  = 1 << 4,
-    XCOMP_FLAG_IS_DRAGGING          = 1 << 5,
-    XCOMP_FLAG_WANTS_KEYBOARD_FOCUS = 1 << 6,
-    XCOMP_FLAG_HAS_KEYBOARD_FOCUS   = 1 << 7,
-    XCOMP_FLAG_OWNS_CHILDREN        = 1 << 8,
-    XCOMP_FLAG_IS_DISABLED          = 1 << 9,
-    XCOMP_FLAG_IS_DROP_TARGET       = 1 << 10,
+    XCOMP_FLAG_IS_DISABLED          = 1 << 0,
+    XCOMP_FLAG_IS_HIDDEN            = 1 << 1,
+    XCOMP_FLAG_IS_MOUSE_OVER        = 1 << 2,
+    XCOMP_FLAG_IS_MOUSE_LEFT_DOWN   = 1 << 3,
+    XCOMP_FLAG_IS_MOUSE_MIDDLE_DOWN = 1 << 4,
+    XCOMP_FLAG_IS_MOUSE_RIGHT_DOWN  = 1 << 5,
+    XCOMP_FLAG_IS_DRAGGING          = 1 << 6,
+    // If a dragged component has this flag it will trigger drag
+    // enter/exit/drop events on other components
+    XCOMP_FLAG_CAN_DRAG_AND_DROP    = 1 << 7,
+    XCOMP_FLAG_WANTS_KEYBOARD_FOCUS = 1 << 8,
+    XCOMP_FLAG_HAS_KEYBOARD_FOCUS   = 1 << 9,
 };
 
 enum xcomp_modifier : uint64_t
@@ -172,6 +173,7 @@ struct xcomp_root
     xcomp_component* mouse_left_down;
     xcomp_component* mouse_right_down;
     xcomp_component* mouse_middle_down;
+    xcomp_component* mouse_drag_over;
     xcomp_component* keyboard_focus;
 
     xcomp_position position;
@@ -182,7 +184,7 @@ typedef struct xcomp_root xcomp_root;
 
 // Check is not all 0s
 inline bool xcomp_is_empty(xcomp_dimensions d);
-// Check mod flags for a popup menu
+// Check mouse & keyboard mod flags for popup menu
 inline bool xcomp_is_popup_menu(uint64_t mods);
 // Check coordinate lies within dimensions
 inline bool xcomp_hit_test(xcomp_dimensions d, xcomp_position pos);
@@ -371,7 +373,7 @@ void xcomp_add_child(xcomp_component* comp, xcomp_component* child)
 {
     comp->children[comp->num_children] = child;
     child->parent                      = comp;
-    comp->num_children += 1;
+    comp->num_children                 += 1;
 }
 
 void xcomp_remove_child(xcomp_component* comp, xcomp_component* child)
@@ -519,10 +521,36 @@ void xcomp_send_mouse_position(xcomp_root* root, xcomp_event_data info)
     else if (last_over == root->mouse_left_down)
     {
         // Check still dragging
-        if (root->mouse_left_down->flags & XCOMP_FLAG_IS_DRAGGING)
+        if (last_over->flags & XCOMP_FLAG_IS_DRAGGING)
         {
             last_over->event_handler(last_over, XCOMP_EVENT_DRAG_MOVE, info);
-            // TODO: find drop target
+
+            if (last_over->flags & XCOMP_FLAG_CAN_DRAG_AND_DROP)
+            {
+                next_over = xcomp_find_child_at(root->main, {info.x, info.y});
+
+                if (next_over != root->mouse_drag_over)
+                {
+                    xcomp_component* last_drag_over = root->mouse_drag_over;
+                    root->mouse_drag_over           = next_over;
+
+                    if (last_drag_over != NULL)
+                    {
+                        last_drag_over->event_handler(
+                            last_drag_over,
+                            XCOMP_EVENT_DRAG_EXIT,
+                            info);
+                    }
+
+                    if (next_over != NULL)
+                    {
+                        next_over->event_handler(
+                            next_over,
+                            XCOMP_EVENT_DRAG_ENTER,
+                            info);
+                    }
+                }
+            }
         }
         else
         {
@@ -536,8 +564,10 @@ void xcomp_send_mouse_position(xcomp_root* root, xcomp_event_data info)
         // check mouse still over
         if (xcomp_hit_test(last_over->dimensions, {info.x, info.y}))
             next_over = xcomp_find_child_at(last_over, {info.x, info.y});
-        else // mouse exited
-            next_over = xcomp_find_parent_at(last_over, {info.x, info.y});
+        // Check mouse still in window
+        // User may have finished a drag
+        else if (xcomp_hit_test(root->main->dimensions, {info.x, info.y}))
+            next_over = xcomp_find_child_at(root->main, {info.x, info.y});
 
         root->mouse_over = next_over;
 
@@ -555,7 +585,6 @@ void xcomp_send_mouse_position(xcomp_root* root, xcomp_event_data info)
                 xcomp_send_mouse_enter(next_over, info);
         }
     }
-    // TODO: handle mouse down
     // TODO: handle mouse wheel
     // TODO: handle mouse pinch
 }
@@ -570,7 +599,7 @@ void xcomp_send_mouse_down(xcomp_root* root, xcomp_event_data info)
             root->mouse_left_down == NULL)
         {
             root->mouse_left_down = comp;
-            comp->flags |= XCOMP_FLAG_IS_MOUSE_LEFT_DOWN;
+            comp->flags           |= XCOMP_FLAG_IS_MOUSE_LEFT_DOWN;
 
             if (comp->flags & XCOMP_FLAG_WANTS_KEYBOARD_FOCUS)
                 xcomp_root_give_keyboard_focus(root, comp);
@@ -583,7 +612,7 @@ void xcomp_send_mouse_down(xcomp_root* root, xcomp_event_data info)
             root->mouse_right_down == NULL)
         {
             root->mouse_right_down = comp;
-            comp->flags |= XCOMP_FLAG_IS_MOUSE_RIGHT_DOWN;
+            comp->flags            |= XCOMP_FLAG_IS_MOUSE_RIGHT_DOWN;
 
             if (comp->flags & XCOMP_FLAG_WANTS_KEYBOARD_FOCUS)
                 xcomp_root_give_keyboard_focus(root, comp);
@@ -596,7 +625,7 @@ void xcomp_send_mouse_down(xcomp_root* root, xcomp_event_data info)
             root->mouse_middle_down == NULL)
         {
             root->mouse_middle_down = comp;
-            comp->flags |= XCOMP_FLAG_IS_MOUSE_MIDDLE_DOWN;
+            comp->flags             |= XCOMP_FLAG_IS_MOUSE_MIDDLE_DOWN;
 
             if (comp->flags & XCOMP_FLAG_WANTS_KEYBOARD_FOCUS)
                 xcomp_root_give_keyboard_focus(root, comp);
@@ -619,12 +648,22 @@ void xcomp_send_mouse_up(xcomp_root* root, xcomp_event_data info)
 
         if (last_comp->flags & XCOMP_FLAG_IS_DRAGGING)
         {
+            if (root->mouse_drag_over != NULL)
+            {
+                xcomp_component* last_drag_over = root->mouse_drag_over;
+                root->mouse_drag_over           = NULL;
+                last_drag_over->event_handler(
+                    last_drag_over,
+                    XCOMP_EVENT_DRAG_DROP,
+                    info);
+            }
+
             last_comp->flags &= ~XCOMP_FLAG_IS_DRAGGING;
             last_comp->event_handler(last_comp, XCOMP_EVENT_DRAG_END, info);
-            // TODO: drop on target
-        }
 
-        if (last_comp->flags & XCOMP_FLAG_IS_MOUSE_LEFT_DOWN)
+            xcomp_send_mouse_exit(last_comp, info);
+        }
+        else if (last_comp->flags & XCOMP_FLAG_IS_MOUSE_LEFT_DOWN)
         {
             last_comp->flags &= ~XCOMP_FLAG_IS_MOUSE_LEFT_DOWN;
             last_comp->event_handler(
@@ -714,6 +753,7 @@ void xcomp_root_clear(xcomp_root* root)
     xcomp_component* last_mouse_left_down   = root->mouse_left_down;
     xcomp_component* last_mouse_right_down  = root->mouse_right_down;
     xcomp_component* last_mouse_middle_down = root->mouse_middle_down;
+    xcomp_component* last_mouse_drag_over   = root->mouse_drag_over;
     xcomp_component* last_keyboard_focus    = root->keyboard_focus;
     xcomp_event_data edata                  = {
                          .x         = root->position.x,
@@ -724,8 +764,17 @@ void xcomp_root_clear(xcomp_root* root)
     root->mouse_left_down   = NULL;
     root->mouse_right_down  = NULL;
     root->mouse_middle_down = NULL;
+    root->mouse_drag_over   = NULL;
 
     xcomp_root_give_keyboard_focus(root, NULL);
+
+    if (last_mouse_drag_over != NULL)
+    {
+        last_mouse_drag_over->event_handler(
+            last_mouse_drag_over,
+            XCOMP_EVENT_DRAG_EXIT,
+            edata);
+    }
 
     if (last_mouse_middle_down != NULL)
     {
