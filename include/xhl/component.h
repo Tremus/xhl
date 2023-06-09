@@ -37,10 +37,17 @@ enum xcomp_event : uint32_t
     XCOMP_EVENT_MOUSE_MIDDLE_DOWN,
     XCOMP_EVENT_MOUSE_MIDDLE_UP,
     XCOMP_EVENT_MOUSE_MIDDLE_CLICK,
-    XCOMP_EVENT_MOUSE_DRAG,
-    XCOMP_EVENT_MOUSE_DROP,
     XCOMP_EVENT_MOUSE_WHEEL,
     XCOMP_EVENT_MOUSE_PINCH,
+    // Dragging
+    // These are sent to the component being dragged
+    XCOMP_EVENT_DRAG_START,
+    XCOMP_EVENT_DRAG_MOVE,
+    XCOMP_EVENT_DRAG_END,
+    // These are sent to the component being dragged over
+    XCOMP_EVENT_DRAG_ENTER,
+    XCOMP_EVENT_DRAG_EXIT,
+    XCOMP_EVENT_DRAG_DROP,
     // keyboard
     XCOMP_EVENT_KEY_DOWN,
     XCOMP_EVENT_KEY_UP,
@@ -59,6 +66,7 @@ enum xcomp_flag : uint64_t
     XCOMP_FLAG_HAS_KEYBOARD_FOCUS   = 1 << 7,
     XCOMP_FLAG_OWNS_CHILDREN        = 1 << 8,
     XCOMP_FLAG_IS_DISABLED          = 1 << 9,
+    XCOMP_FLAG_IS_DROP_TARGET       = 1 << 10,
 };
 
 enum xcomp_modifier : uint64_t
@@ -507,6 +515,22 @@ void xcomp_send_mouse_position(xcomp_root* root, xcomp_event_data info)
             xcomp_send_mouse_enter(next_over, info);
         }
     }
+    // Check for drag
+    else if (last_over == root->mouse_left_down)
+    {
+        // Check still dragging
+        if (root->mouse_left_down->flags & XCOMP_FLAG_IS_DRAGGING)
+        {
+            last_over->event_handler(last_over, XCOMP_EVENT_DRAG_MOVE, info);
+            // TODO: find drop target
+        }
+        else
+        {
+            last_over->flags |= XCOMP_FLAG_IS_DRAGGING;
+            last_over->event_handler(last_over, XCOMP_EVENT_DRAG_START, info);
+            last_over->event_handler(last_over, XCOMP_EVENT_DRAG_MOVE, info);
+        }
+    }
     else
     {
         // check mouse still over
@@ -593,6 +617,13 @@ void xcomp_send_mouse_up(xcomp_root* root, xcomp_event_data info)
         xcomp_component* last_comp = root->mouse_left_down;
         root->mouse_left_down      = NULL;
 
+        if (last_comp->flags & XCOMP_FLAG_IS_DRAGGING)
+        {
+            last_comp->flags &= ~XCOMP_FLAG_IS_DRAGGING;
+            last_comp->event_handler(last_comp, XCOMP_EVENT_DRAG_END, info);
+            // TODO: drop on target
+        }
+
         if (last_comp->flags & XCOMP_FLAG_IS_MOUSE_LEFT_DOWN)
         {
             last_comp->flags &= ~XCOMP_FLAG_IS_MOUSE_LEFT_DOWN;
@@ -609,6 +640,13 @@ void xcomp_send_mouse_up(xcomp_root* root, xcomp_event_data info)
                 XCOMP_EVENT_MOUSE_LEFT_CLICK,
                 info);
             // TODO: record time and component in case of a double click
+        }
+        // If components do not match, the component must have been dragged into
+        // different boundaries. We need to find which component the mouse is
+        // hovering over
+        else
+        {
+            xcomp_send_mouse_position(root, info);
         }
     }
 
@@ -709,6 +747,15 @@ void xcomp_root_clear(xcomp_root* root)
 
     if (last_mouse_left_down != NULL)
     {
+        if (last_mouse_left_down->flags & XCOMP_FLAG_IS_DRAGGING)
+        {
+            last_mouse_left_down->flags &= ~XCOMP_FLAG_IS_DRAGGING;
+            last_mouse_left_down->event_handler(
+                last_mouse_left_down,
+                XCOMP_EVENT_DRAG_END,
+                edata);
+        }
+
         last_mouse_left_down->flags &= ~XCOMP_FLAG_IS_MOUSE_LEFT_DOWN;
         last_mouse_left_down->event_handler(
             last_mouse_left_down,
