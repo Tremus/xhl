@@ -120,7 +120,7 @@ union xcomp_dimensions
     struct
     {
         xcomp_position position;
-        xcomp_size size;
+        xcomp_size     size;
     };
     float data[4]; // vec4
 };
@@ -129,11 +129,11 @@ typedef union xcomp_dimensions xcomp_dimensions;
 union xcomp_event_data
 {
     uint64_t raw;
-    void* ptr;
+    void*    ptr;
     struct
     {
-        float x;
-        float y;
+        float    x;
+        float    y;
         uint64_t modifiers;
     };
 };
@@ -143,15 +143,15 @@ struct xcomp_component
 {
     xcomp_dimensions dimensions;
 
-    struct xcomp_component* parent;
+    struct xcomp_component*  parent;
     struct xcomp_component** children;
-    size_t num_children;
+    size_t                   num_children;
     // size_t cap_children;
 
     uint64_t flags;
     void (*event_handler)(
         struct xcomp_component*,
-        uint32_t event,
+        uint32_t         event,
         xcomp_event_data data);
 
     // Keep a ptr to your data here
@@ -187,7 +187,7 @@ inline bool xcomp_is_empty(xcomp_dimensions d);
 // Check mouse & keyboard mod flags for popup menu
 inline bool xcomp_is_popup_menu(uint64_t mods);
 // Check coordinate lies within dimensions
-inline bool xcomp_hit_test(xcomp_dimensions d, xcomp_position pos);
+inline bool           xcomp_hit_test(xcomp_dimensions d, xcomp_position pos);
 inline xcomp_position xcomp_centre(xcomp_dimensions d);
 
 // COMPONENT METHODS
@@ -211,6 +211,7 @@ void xcomp_remove_child(xcomp_component* comp, xcomp_component* child);
 void xcomp_set_visible(xcomp_component* comp, bool visible);
 // You should call xcomp_root_clear() after using this!
 void xcomp_set_enabled(xcomp_component* comp, bool enabled);
+
 inline bool xcomp_is_hidden(xcomp_component*);
 inline bool xcomp_is_enabled(xcomp_component*);
 // checks through parent heirarchy until it finds the root
@@ -291,7 +292,7 @@ extern "C" {
 void xcomp_send_mouse_exit(xcomp_component* comp, xcomp_event_data info);
 
 void xcomp_root_give_keyboard_focus(
-    xcomp_root* root,
+    xcomp_root*      root,
     xcomp_component* next_comp)
 {
     xcomp_component* last_comp = root->keyboard_focus;
@@ -329,8 +330,6 @@ void xcomp_root_give_keyboard_focus(
 
 void xcomp_init(xcomp_component* comp, void* data)
 {
-    memset(comp, 0, sizeof(*comp));
-
     comp->event_handler = &xcomp_empty_event_cb;
     comp->data          = data;
 }
@@ -378,8 +377,8 @@ void xcomp_add_child(xcomp_component* comp, xcomp_component* child)
 
 void xcomp_remove_child(xcomp_component* comp, xcomp_component* child)
 {
-    bool child_was_removed = false;
-    size_t i               = 0;
+    bool   child_was_removed = false;
+    size_t i                 = 0;
 
     // Search through nodes an zero the child comp
     for (; i < comp->num_children; i++)
