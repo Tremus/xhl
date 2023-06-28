@@ -645,6 +645,15 @@ void xcomp_send_mouse_up(xcomp_root* root, xcomp_event_data info)
         xcomp_component* last_comp = root->mouse_left_down;
         root->mouse_left_down      = NULL;
 
+        if (last_comp->flags & XCOMP_FLAG_IS_MOUSE_LEFT_DOWN)
+        {
+            last_comp->flags &= ~XCOMP_FLAG_IS_MOUSE_LEFT_DOWN;
+            last_comp->event_handler(
+                last_comp,
+                XCOMP_EVENT_MOUSE_LEFT_UP,
+                info);
+        }
+
         if (last_comp->flags & XCOMP_FLAG_IS_DRAGGING)
         {
             if (root->mouse_drag_over != NULL)
@@ -660,15 +669,8 @@ void xcomp_send_mouse_up(xcomp_root* root, xcomp_event_data info)
             last_comp->flags &= ~XCOMP_FLAG_IS_DRAGGING;
             last_comp->event_handler(last_comp, XCOMP_EVENT_DRAG_END, info);
 
-            xcomp_send_mouse_exit(last_comp, info);
-        }
-        else if (last_comp->flags & XCOMP_FLAG_IS_MOUSE_LEFT_DOWN)
-        {
-            last_comp->flags &= ~XCOMP_FLAG_IS_MOUSE_LEFT_DOWN;
-            last_comp->event_handler(
-                last_comp,
-                XCOMP_EVENT_MOUSE_LEFT_UP,
-                info);
+            if (comp != last_comp)
+                xcomp_send_mouse_exit(last_comp, info);
         }
 
         if (last_comp == comp)
