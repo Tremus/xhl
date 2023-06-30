@@ -377,11 +377,12 @@ void xcomp_add_child(xcomp_component* comp, xcomp_component* child)
 
 void xcomp_remove_child(xcomp_component* comp, xcomp_component* child)
 {
-    bool   child_was_removed = false;
-    size_t i                 = 0;
+    bool child_was_removed = false;
 
-    // Search through nodes an zero the child comp
-    for (; i < comp->num_children; i++)
+    size_t i = comp->num_children;
+
+    // Search through nodes and zero the child comp
+    for (; i-- != 0;)
     {
         // try and remove child
         if (comp->children[i] == child)
