@@ -214,7 +214,10 @@ void xcomp_set_enabled(xcomp_component* comp, bool enabled);
 
 inline bool xcomp_is_hidden(xcomp_component*);
 inline bool xcomp_is_enabled(xcomp_component*);
-// checks through parent heirarchy until it finds the root
+// Traverses backwards through parent hierarchy until it finds the root.
+// If you keep a pointer to your whole applicaton on your root component, then
+// this is a useful way to retrieve it inside event callbacks from any child in
+// your hierarchy
 xcomp_component* xcomp_get_root_component(xcomp_component* comp);
 
 // recursively loops though children until it finds the bottom level
@@ -233,6 +236,10 @@ void xcomp_send_mouse_up(xcomp_root*, xcomp_event_data info);
 void xcomp_send_keyboard_message(xcomp_root*, xcomp_event_data info);
 // set component to NULL to remove focus
 void xcomp_root_give_keyboard_focus(xcomp_root*, xcomp_component* comp);
+// Useful function to call anytime someone presses the TAB keyboard key
+void xcomp_root_give_next_sibling_keyboard_focus(
+    xcomp_root*,
+    xcomp_component* comp);
 // This will flush and update the properties of xcomp_root
 // Call this before any component gets deleted to 0 any dangling pointers
 // Call this after the visibility of any component changes
@@ -325,6 +332,44 @@ void xcomp_root_give_keyboard_focus(
             next_comp,
             XCOMP_EVENT_KEYBOARD_FOCUS_CHANGED,
             edata);
+    }
+}
+
+void xcomp_root_give_next_sibling_keyboard_focus(
+    xcomp_root*      root,
+    xcomp_component* comp)
+{
+    // User is (hopefully) smart enough to give us a component with a valid
+    // parent.
+    xcomp_component* parent = comp->parent;
+
+    // Find index of comp
+    size_t index = 0;
+    for (; index < parent->num_children; index++)
+    {
+        if (parent->children[index] == comp)
+            break;
+    }
+
+    // Find the next child to the right to give component to
+    for (size_t i = index + 1; i < parent->num_children; i++)
+    {
+        if (parent->children[i]->flags & XCOMP_FLAG_WANTS_KEYBOARD_FOCUS)
+        {
+            xcomp_root_give_keyboard_focus(root, parent->children[i]);
+            return;
+        }
+    }
+
+    // If the previous loop failed, there were no valid components to right.
+    // Apply the same strategy starting from the begging of the list.
+    for (size_t i = 0; i < index; i++)
+    {
+        if (parent->children[i]->flags & XCOMP_FLAG_WANTS_KEYBOARD_FOCUS)
+        {
+            xcomp_root_give_keyboard_focus(root, parent->children[i]);
+            break;
+        }
     }
 }
 
