@@ -594,6 +594,17 @@ void xcomp_send_mouse_down(xcomp_root* root, xcomp_event_data info)
     xcomp_component* comp = xcomp_find_child_at(root->main, {info.x, info.y});
     if (comp != NULL)
     {
+        if (comp != root->keyboard_focus && root->keyboard_focus != NULL)
+        {
+            xcomp_component* last_comp = root->keyboard_focus;
+            root->keyboard_focus       = NULL;
+            last_comp->flags           &= ~XCOMP_FLAG_HAS_KEYBOARD_FOCUS;
+            last_comp->event_handler(
+                last_comp,
+                XCOMP_EVENT_KEYBOARD_FOCUS_CHANGED,
+                info);
+        }
+
         // handle left button
         if ((info.modifiers & XCOMP_MOD_LEFT_BUTTON) &&
             root->mouse_left_down == NULL)
