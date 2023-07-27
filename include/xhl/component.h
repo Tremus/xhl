@@ -165,10 +165,8 @@ struct xcomp_root
     // Main is your root level component
     xcomp_component* main;
     // These hold state of basic mouse & keyboard events
-    // To keep this state clean, call xcomp_root_clear()
-    // BEFORE you DELETE any component or AFTER you change
-    // the VISIBILITY of a component
-    // See @xcomp_root_clear()
+    // To keep this state clean, see instructions for
+    // xcomp_root_clear() & xcomp_root_refresh()
     xcomp_component* mouse_over;
     xcomp_component* mouse_left_down;
     xcomp_component* mouse_right_down;
@@ -241,10 +239,11 @@ void xcomp_root_give_next_sibling_keyboard_focus(
     xcomp_root*,
     xcomp_component* comp);
 // This will flush and update the properties of xcomp_root
-// Call this before any component gets deleted to 0 any dangling pointers
-// Call this after the visibility of any component changes
-// Call this after enabling / disabling any components
+// Call this BEFORE any component gets deleted to 0 any dangling pointers
 void xcomp_root_clear(xcomp_root*);
+// Similar to xcomp_root_clear
+// Call this AFTER toggling components HIDDEN or DISABLED flags
+void xcomp_root_refresh(xcomp_root*);
 
 // INLINE IMPLEMENTATIONS
 
@@ -872,9 +871,16 @@ void xcomp_root_clear(xcomp_root* root)
 
     if (last_mouse_over != NULL)
         xcomp_send_mouse_exit(last_mouse_over, edata);
+}
+
+void xcomp_root_refresh(xcomp_root* root)
+{
+    xcomp_root_clear(root);
 
     // find new component for mouse to be over
-    xcomp_send_mouse_position(root, edata);
+    xcomp_send_mouse_position(
+        root,
+        {.x = root->position.x, .y = root->position.y, .modifiers = 0});
 }
 
 #ifdef __cplusplus
