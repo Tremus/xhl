@@ -1,7 +1,7 @@
 #pragma once
 
 /**
-    Quick and dirty malloc debugger
+    Quick and dirty xmalloc
 */
 
 #include <stddef.h>
@@ -10,18 +10,17 @@ void xmalloc_init();
 void xmalloc_shutdown();
 
 void* xmalloc(size_t size);
-void xfree(void*);
+void* xrealloc(void*, size_t size);
+void  xfree(void*);
 
-// TODO
-// void xrealloc(void*, size_t size);
-
-// #ifdef XHL_MALLOC_IMPL
+#ifdef XHL_MALLOC_IMPL
 #include <assert.h>
-#include <stdio.h>
+#include <errno.h>
 #include <stdlib.h>
-#include <string.h>
 
 #ifdef DEBUG
+// NOTE: Not recommended for debugging in multi-instance & multi-threaded
+// contexts.
 int g_num_xmallocs = 0;
 #endif
 
@@ -43,25 +42,32 @@ void* xmalloc(size_t size)
 {
     void* ptr = malloc(size);
     if (ptr == NULL)
-    {
-        printf("Out of memory!");
-        exit(EXIT_FAILURE);
-    }
-
-    memset(ptr, 0, size);
+        exit(ENOMEM);
 #ifdef DEBUG
     g_num_xmallocs++;
 #endif
+    return ptr;
+}
+
+void* xrealloc(void* ptr, size_t new_size)
+{
+    void* new_ptr = realloc(ptr, new_size);
+    if (new_ptr == NULL)
+        exit(ENOMEM);
+#ifdef DEBUG
+    if (ptr == NULL)
+        g_num_xmallocs++;
+#endif
+    return new_ptr;
 }
 
 void xfree(void* ptr)
 {
     free(ptr);
-
 #ifdef DEBUG
     g_num_xmallocs--;
     assert(g_num_xmallocs >= 0);
 #endif
 }
 
-// #endif
+#endif
