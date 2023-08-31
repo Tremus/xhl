@@ -25,15 +25,15 @@ template<class xarr_T>
 #define xarr_T void
 #endif
 static xarr_T* __xarr_setcap(struct xarray_header* next_ptr, size_t next_cap, xarr_T* ptr) {
-    next_ptr->length = 0;
+    if (!ptr) next_ptr->length = 0;
     next_ptr->capacity = next_cap;
     return (xarr_T*)(next_ptr+1);
 }
 #define xarr_setcap(a, N)     (xarr_cap(a) < (N) \
                               ? (void)((a) = __xarr_setcap((struct xarray_header*)XARR_REALLOC(((a) ? (void*)xarr_header(a) : (void*)a), sizeof(*a)*(N<(xarr_cap(a)*2)?(xarr_cap(a)*2):N)+sizeof(struct xarray_header)), (N<(xarr_cap(a)*2)?(xarr_cap(a)*2):N), (a)))\
                               : (void)0)
-#define xarr_setlen(a, N)     (xarr_setcap((a), (N)), xarr_header(a)->length = (N))
-#define xarr_addn(a, N)       (xarr_setcap(a, xarr_len(a) + (N)), xarr_header(a)->length += (N))
+#define xarr_setlen(a, N)     (xarr_len(a) != (N) ? (void)(xarr_setcap((a), (N)), xarr_header(a)->length = (N)) : (void)0)
+#define xarr_addn(a, N)       (xarr_setlen(a, xarr_len(a) + (N)))
 #define xarr_push(a, v)       (xarr_setcap(a, xarr_len(a) + 1), (a)[xarr_header(a)->length++] = (v))
 #define xarr_insertn(a, i, N) (xarr_addn((a), (N)), memmove(&(a)[(i) + (N)],  &(a)[i], sizeof *(a) * (xarr_header(a)->length - (N) - (i))))
 #define xarr_insert(a, i, v)  (xarr_insertn((a), (i), 1), (a)[i] = (v))
