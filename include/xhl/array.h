@@ -19,18 +19,16 @@ struct xarray_header
 #define xarr_cap(a)           ((a) ? xarr_header(a)->capacity : 0)
 #define xarr_free(a)          ((void)((a) ? XARR_FREE(xarr_header(a)) : (void)0), (a) = NULL)
 #ifdef __cplusplus
-template<class T> static T* __xarr_setcap(struct xarray_header* next_ptr, size_t next_cap, T*) {
-    next_ptr->length = 0;
-    next_ptr->capacity = next_cap;
-    return (T*)(next_ptr+1);
-}
+#define xarr_T T
+template<class xarr_T>
 #else
-static void* __xarr_setcap(struct xarray_header* next_ptr, size_t next_cap, void* ptr) {
+#define xarr_T void
+#endif
+static xarr_T* __xarr_setcap(struct xarray_header* next_ptr, size_t next_cap, xarr_T* ptr) {
     next_ptr->length = 0;
     next_ptr->capacity = next_cap;
-    return (next_ptr+1);
+    return (xarr_T*)(next_ptr+1);
 }
-#endif
 #define xarr_setcap(a, N)     (xarr_cap(a) < (N) \
                               ? (void)((a) = __xarr_setcap((struct xarray_header*)XARR_REALLOC(((a) ? (void*)xarr_header(a) : (void*)a), sizeof(*a)*(N<(xarr_cap(a)*2)?(xarr_cap(a)*2):N)+sizeof(struct xarray_header)), (N<(xarr_cap(a)*2)?(xarr_cap(a)*2):N), (a)))\
                               : (void)0)
