@@ -19,25 +19,21 @@ struct xarray_header
 #define xarr_cap(a)           ((a) ? xarr_header(a)->capacity : 0)
 #define xarr_free(a)          ((void)((a) ? XARR_FREE(xarr_header(a)) : (void)0), (a) = NULL)
 #ifdef __cplusplus
-template<class T> static T* __xarr_setcap(T* ptr, size_t N, size_t type_size)
-#else
-static void* __xarr_setcap(void* ptr, size_t N, size_t type_size)
-#endif
-{
-    size_t next_cap = xarr_cap(ptr) * 2;
-    next_cap = next_cap < 8 ? 8 : next_cap;
-    next_cap = next_cap < N ? N : next_cap;
-    const size_t alloc_size = type_size * next_cap + sizeof(struct xarray_header);
-    struct xarray_header* next_ptr = (struct xarray_header*)XARR_REALLOC((ptr ? (void*)xarr_header(ptr) : (void*)ptr), alloc_size);
+template<class T> static T* __xarr_setcap(struct xarray_header* next_ptr, size_t next_cap, T*) {
     next_ptr->length = 0;
     next_ptr->capacity = next_cap;
-#ifdef __cplusplus
     return (T*)(next_ptr+1);
-#else
-    return next_ptr+1;
-#endif
 }
-#define xarr_setcap(a, N)     (xarr_cap(a) < (N) ? (void)((a) = __xarr_setcap((a), (N), sizeof(*(a)))) : (void)0)
+#else
+static void* __xarr_setcap(struct xarray_header* next_ptr, size_t next_cap, void* ptr) {
+    next_ptr->length = 0;
+    next_ptr->capacity = next_cap;
+    return (next_ptr+1);
+}
+#endif
+#define xarr_setcap(a, N)     (xarr_cap(a) < (N) \
+                              ? (void)((a) = __xarr_setcap((struct xarray_header*)XARR_REALLOC(((a) ? (void*)xarr_header(a) : (void*)a), sizeof(*a)*(N<(xarr_cap(a)*2)?(xarr_cap(a)*2):N)+sizeof(struct xarray_header)), (N<(xarr_cap(a)*2)?(xarr_cap(a)*2):N), (a)))\
+                              : (void)0)
 #define xarr_setlen(a, N)     (xarr_setcap((a), (N)), xarr_header(a)->length = (N))
 #define xarr_addn(a, N)       (xarr_setcap(a, xarr_len(a) + (N)), xarr_header(a)->length += (N))
 #define xarr_push(a, v)       (xarr_setcap(a, xarr_len(a) + 1), (a)[xarr_header(a)->length++] = (v))
