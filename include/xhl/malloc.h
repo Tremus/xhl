@@ -14,13 +14,12 @@ void* xrealloc(void*, size_t size);
 void  xfree(void*);
 
 #ifdef XHL_MALLOC_IMPL
-#include <assert.h>
 #include <errno.h>
 #include <stdlib.h>
 
 #ifdef DEBUG
-// NOTE: Not recommended for debugging in multi-instance & multi-threaded
-// contexts.
+#include <xhl/debug.h>
+// Not recommended for debugging in multi-instance & multi-threaded contexts.
 int g_num_xmallocs = 0;
 #endif
 
@@ -34,7 +33,7 @@ void xmalloc_init()
 void xmalloc_shutdown()
 {
 #ifdef DEBUG
-    assert(g_num_xmallocs == 0);
+    xassert(g_num_xmallocs == 0);
 #endif
 }
 
@@ -66,7 +65,7 @@ void xfree(void* ptr)
     free(ptr);
 #ifdef DEBUG
     g_num_xmallocs--;
-    assert(g_num_xmallocs >= 0);
+    xassert(g_num_xmallocs >= 0);
 #endif
 }
 
