@@ -41,4 +41,5 @@ static xarr_T* __xarr_setcap(struct xarray_header* next_ptr, size_t next_cap, xa
 #define xarr_delete(a, i)     xarr_deleten(a, (i), 1)
 #define xarr_last(a)          ((a)[xarr_header(a)->length - 1])
 #define xarr_pop(a)           (xarr_header(a)->length--, (a)[xarr_header(a)->length])
+#define xarr_end(a)          ((a) + xarr_len(a))
 // clang-format on
