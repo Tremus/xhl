@@ -149,10 +149,7 @@ struct xcomp_component
     // size_t cap_children;
 
     uint64_t flags;
-    void (*event_handler)(
-        struct xcomp_component*,
-        uint32_t         event,
-        xcomp_event_data data);
+    void (*event_handler)(struct xcomp_component*, uint32_t event, xcomp_event_data data);
 
     // Keep a ptr to your data here
     void* data;
@@ -235,9 +232,7 @@ void xcomp_send_keyboard_message(xcomp_root*, xcomp_event_data info);
 // set component to NULL to remove focus
 void xcomp_root_give_keyboard_focus(xcomp_root*, xcomp_component* comp);
 // Useful function to call anytime someone presses the TAB keyboard key
-void xcomp_root_give_next_sibling_keyboard_focus(
-    xcomp_root*,
-    xcomp_component* comp);
+void xcomp_root_give_next_sibling_keyboard_focus(xcomp_root*, xcomp_component* comp);
 // This will flush and update the properties of xcomp_root
 // Call this BEFORE any component gets deleted to 0 any dangling pointers
 void xcomp_root_clear(xcomp_root*);
@@ -247,17 +242,13 @@ void xcomp_root_refresh(xcomp_root*);
 
 // INLINE IMPLEMENTATIONS
 
-bool xcomp_is_empty(xcomp_dimensions d)
-{
-    return d.width == 0.0f || d.height == 0.0f;
-}
+bool xcomp_is_empty(xcomp_dimensions d) { return d.width == 0.0f || d.height == 0.0f; }
 
 bool xcomp_is_popup_menu(uint64_t mods)
 {
     return
 #ifdef __APPLE__
-        ((mods & (XCOMP_MOD_CTRL_BUTTON | XCOMP_MOD_LEFT_BUTTON)) ==
-         (XCOMP_MOD_CTRL_BUTTON | XCOMP_MOD_LEFT_BUTTON)) ||
+        ((mods & (XCOMP_MOD_CTRL_BUTTON | XCOMP_MOD_LEFT_BUTTON)) == (XCOMP_MOD_CTRL_BUTTON | XCOMP_MOD_LEFT_BUTTON)) ||
 #endif
         (mods & XCOMP_MOD_RIGHT_BUTTON);
 }
@@ -271,13 +262,11 @@ bool xcomp_hit_test(xcomp_dimensions d, xcomp_position pos)
 
 xcomp_position xcomp_centre(xcomp_dimensions d)
 {
-    return {.data = {0.5f * d.width + d.x, 0.5f * d.height + d.y}};
+    xcomp_position p = {.x = 0.5f * d.width + d.x, .y = 0.5f * d.height + d.y};
+    return p;
 }
 
-bool xcomp_is_hidden(xcomp_component* comp)
-{
-    return (comp->flags & XCOMP_FLAG_IS_HIDDEN) == XCOMP_FLAG_IS_HIDDEN;
-}
+bool xcomp_is_hidden(xcomp_component* comp) { return (comp->flags & XCOMP_FLAG_IS_HIDDEN) == XCOMP_FLAG_IS_HIDDEN; }
 
 bool xcomp_is_enabled(xcomp_component* comp)
 {
@@ -297,9 +286,7 @@ extern "C" {
 
 void xcomp_send_mouse_exit(xcomp_component* comp, xcomp_event_data info);
 
-void xcomp_root_give_keyboard_focus(
-    xcomp_root*      root,
-    xcomp_component* next_comp)
+void xcomp_root_give_keyboard_focus(xcomp_root* root, xcomp_component* next_comp)
 {
     xcomp_component* last_comp = root->keyboard_focus;
     xcomp_event_data edata;
@@ -311,28 +298,19 @@ void xcomp_root_give_keyboard_focus(
     if (last_comp != NULL && (last_comp->flags & XCOMP_FLAG_HAS_KEYBOARD_FOCUS))
     {
         last_comp->flags &= ~XCOMP_FLAG_HAS_KEYBOARD_FOCUS;
-        last_comp->event_handler(
-            last_comp,
-            XCOMP_EVENT_KEYBOARD_FOCUS_CHANGED,
-            edata);
+        last_comp->event_handler(last_comp, XCOMP_EVENT_KEYBOARD_FOCUS_CHANGED, edata);
     }
 
     // check should take keyboard focus
-    if (next_comp != NULL &&
-        (next_comp->flags & XCOMP_FLAG_WANTS_KEYBOARD_FOCUS) &&
+    if (next_comp != NULL && (next_comp->flags & XCOMP_FLAG_WANTS_KEYBOARD_FOCUS) &&
         ! (next_comp->flags & XCOMP_FLAG_HAS_KEYBOARD_FOCUS))
     {
         next_comp->flags |= XCOMP_FLAG_HAS_KEYBOARD_FOCUS;
-        next_comp->event_handler(
-            next_comp,
-            XCOMP_EVENT_KEYBOARD_FOCUS_CHANGED,
-            edata);
+        next_comp->event_handler(next_comp, XCOMP_EVENT_KEYBOARD_FOCUS_CHANGED, edata);
     }
 }
 
-void xcomp_root_give_next_sibling_keyboard_focus(
-    xcomp_root*      root,
-    xcomp_component* comp)
+void xcomp_root_give_next_sibling_keyboard_focus(xcomp_root* root, xcomp_component* comp)
 {
     // User is (hopefully) smart enough to give us a component with a valid
     // parent.
@@ -374,7 +352,7 @@ void xcomp_init(xcomp_component* comp, void* data)
     comp->data          = data;
 }
 
-void xcomp_empty_event_cb(xcomp_component*, uint32_t, xcomp_event_data) {}
+void xcomp_empty_event_cb(xcomp_component* comp, uint32_t e, xcomp_event_data d) {}
 
 void xcomp_set_dimensions(xcomp_component* comp, xcomp_dimensions dimensions)
 {
@@ -491,8 +469,7 @@ xcomp_component* xcomp_find_child_at(xcomp_component* comp, xcomp_position p)
         xcomp_component* child = comp->children[i];
 
         // if visible and mouse within dimensions
-        if (! ((child->flags &
-                (XCOMP_FLAG_IS_HIDDEN | XCOMP_FLAG_IS_DISABLED)) != 0) &&
+        if (! ((child->flags & (XCOMP_FLAG_IS_HIDDEN | XCOMP_FLAG_IS_DISABLED)) != 0) &&
             xcomp_hit_test(child->dimensions, p))
             return xcomp_find_child_at(child, p);
     }
@@ -548,9 +525,9 @@ void xcomp_send_mouse_position(xcomp_root* root, xcomp_event_data info)
 
     if (last_over == NULL)
     {
-        if (xcomp_hit_test(root->main->dimensions, {info.x, info.y}))
+        if (xcomp_hit_test(root->main->dimensions, root->position))
         {
-            next_over = xcomp_find_child_at(root->main, {info.x, info.y});
+            next_over = xcomp_find_child_at(root->main, root->position);
 
             root->mouse_over = next_over;
 
@@ -567,7 +544,7 @@ void xcomp_send_mouse_position(xcomp_root* root, xcomp_event_data info)
 
             if (last_over->flags & XCOMP_FLAG_CAN_DRAG_AND_DROP)
             {
-                next_over = xcomp_find_child_at(root->main, {info.x, info.y});
+                next_over = xcomp_find_child_at(root->main, root->position);
 
                 if (next_over != root->mouse_drag_over)
                 {
@@ -576,18 +553,12 @@ void xcomp_send_mouse_position(xcomp_root* root, xcomp_event_data info)
 
                     if (last_drag_over != NULL)
                     {
-                        last_drag_over->event_handler(
-                            last_drag_over,
-                            XCOMP_EVENT_DRAG_EXIT,
-                            info);
+                        last_drag_over->event_handler(last_drag_over, XCOMP_EVENT_DRAG_EXIT, info);
                     }
 
                     if (next_over != NULL)
                     {
-                        next_over->event_handler(
-                            next_over,
-                            XCOMP_EVENT_DRAG_ENTER,
-                            info);
+                        next_over->event_handler(next_over, XCOMP_EVENT_DRAG_ENTER, info);
                     }
                 }
             }
@@ -602,12 +573,12 @@ void xcomp_send_mouse_position(xcomp_root* root, xcomp_event_data info)
     else
     {
         // check mouse still over
-        if (xcomp_hit_test(last_over->dimensions, {info.x, info.y}))
-            next_over = xcomp_find_child_at(last_over, {info.x, info.y});
+        if (xcomp_hit_test(last_over->dimensions, root->position))
+            next_over = xcomp_find_child_at(last_over, root->position);
         // Check mouse still in window
         // User may have finished a drag
-        else if (xcomp_hit_test(root->main->dimensions, {info.x, info.y}))
-            next_over = xcomp_find_child_at(root->main, {info.x, info.y});
+        else if (xcomp_hit_test(root->main->dimensions, root->position))
+            next_over = xcomp_find_child_at(root->main, root->position);
 
         root->mouse_over = next_over;
 
@@ -631,7 +602,8 @@ void xcomp_send_mouse_position(xcomp_root* root, xcomp_event_data info)
 
 void xcomp_send_mouse_down(xcomp_root* root, xcomp_event_data info)
 {
-    xcomp_component* comp = xcomp_find_child_at(root->main, {info.x, info.y});
+    xcomp_position   pos  = {.x = info.x, .y = info.y};
+    xcomp_component* comp = xcomp_find_child_at(root->main, pos);
     if (comp != NULL)
     {
         if (comp != root->keyboard_focus && root->keyboard_focus != NULL)
@@ -639,18 +611,14 @@ void xcomp_send_mouse_down(xcomp_root* root, xcomp_event_data info)
             xcomp_component* last_comp = root->keyboard_focus;
             root->keyboard_focus       = NULL;
             last_comp->flags           &= ~XCOMP_FLAG_HAS_KEYBOARD_FOCUS;
-            last_comp->event_handler(
-                last_comp,
-                XCOMP_EVENT_KEYBOARD_FOCUS_CHANGED,
-                info);
+            last_comp->event_handler(last_comp, XCOMP_EVENT_KEYBOARD_FOCUS_CHANGED, info);
         }
 
         if (comp->flags & XCOMP_FLAG_WANTS_KEYBOARD_FOCUS)
             xcomp_root_give_keyboard_focus(root, comp);
 
         // handle left button
-        if ((info.modifiers & XCOMP_MOD_LEFT_BUTTON) &&
-            root->mouse_left_down == NULL)
+        if ((info.modifiers & XCOMP_MOD_LEFT_BUTTON) && root->mouse_left_down == NULL)
         {
             root->mouse_left_down = comp;
             comp->flags           |= XCOMP_FLAG_IS_MOUSE_LEFT_DOWN;
@@ -659,8 +627,7 @@ void xcomp_send_mouse_down(xcomp_root* root, xcomp_event_data info)
         }
 
         // handle right button
-        if ((info.modifiers & XCOMP_MOD_RIGHT_BUTTON) &&
-            root->mouse_right_down == NULL)
+        if ((info.modifiers & XCOMP_MOD_RIGHT_BUTTON) && root->mouse_right_down == NULL)
         {
             root->mouse_right_down = comp;
             comp->flags            |= XCOMP_FLAG_IS_MOUSE_RIGHT_DOWN;
@@ -669,8 +636,7 @@ void xcomp_send_mouse_down(xcomp_root* root, xcomp_event_data info)
         }
 
         // handle middle button
-        if ((info.modifiers & XCOMP_MOD_MIDDLE_BUTTON) &&
-            root->mouse_middle_down == NULL)
+        if ((info.modifiers & XCOMP_MOD_MIDDLE_BUTTON) && root->mouse_middle_down == NULL)
         {
             root->mouse_middle_down = comp;
             comp->flags             |= XCOMP_FLAG_IS_MOUSE_MIDDLE_DOWN;
@@ -682,11 +648,11 @@ void xcomp_send_mouse_down(xcomp_root* root, xcomp_event_data info)
 
 void xcomp_send_mouse_up(xcomp_root* root, xcomp_event_data info)
 {
-    xcomp_component* comp = xcomp_find_child_at(root->main, {info.x, info.y});
+    xcomp_position   pos  = {.x = info.x, .y = info.y};
+    xcomp_component* comp = xcomp_find_child_at(root->main, pos);
 
     // handle left button
-    if ((info.modifiers & XCOMP_MOD_LEFT_BUTTON) &&
-        root->mouse_left_down != NULL)
+    if ((info.modifiers & XCOMP_MOD_LEFT_BUTTON) && root->mouse_left_down != NULL)
     {
         xcomp_component* last_comp = root->mouse_left_down;
         root->mouse_left_down      = NULL;
@@ -694,10 +660,7 @@ void xcomp_send_mouse_up(xcomp_root* root, xcomp_event_data info)
         if (last_comp->flags & XCOMP_FLAG_IS_MOUSE_LEFT_DOWN)
         {
             last_comp->flags &= ~XCOMP_FLAG_IS_MOUSE_LEFT_DOWN;
-            last_comp->event_handler(
-                last_comp,
-                XCOMP_EVENT_MOUSE_LEFT_UP,
-                info);
+            last_comp->event_handler(last_comp, XCOMP_EVENT_MOUSE_LEFT_UP, info);
         }
 
         if (last_comp->flags & XCOMP_FLAG_IS_DRAGGING)
@@ -706,10 +669,7 @@ void xcomp_send_mouse_up(xcomp_root* root, xcomp_event_data info)
             {
                 xcomp_component* last_drag_over = root->mouse_drag_over;
                 root->mouse_drag_over           = NULL;
-                last_drag_over->event_handler(
-                    last_drag_over,
-                    XCOMP_EVENT_DRAG_DROP,
-                    info);
+                last_drag_over->event_handler(last_drag_over, XCOMP_EVENT_DRAG_DROP, info);
             }
 
             last_comp->flags &= ~XCOMP_FLAG_IS_DRAGGING;
@@ -721,10 +681,7 @@ void xcomp_send_mouse_up(xcomp_root* root, xcomp_event_data info)
 
         if (last_comp == comp)
         {
-            last_comp->event_handler(
-                last_comp,
-                XCOMP_EVENT_MOUSE_LEFT_CLICK,
-                info);
+            last_comp->event_handler(last_comp, XCOMP_EVENT_MOUSE_LEFT_CLICK, info);
             // TODO: record time and component in case of a double click
         }
         // If components do not match, the component must have been dragged into
@@ -737,8 +694,7 @@ void xcomp_send_mouse_up(xcomp_root* root, xcomp_event_data info)
     }
 
     // handle right button
-    if ((info.modifiers & XCOMP_MOD_RIGHT_BUTTON) &&
-        root->mouse_right_down != NULL)
+    if ((info.modifiers & XCOMP_MOD_RIGHT_BUTTON) && root->mouse_right_down != NULL)
     {
         xcomp_component* last_comp = root->mouse_right_down;
         root->mouse_right_down     = NULL;
@@ -746,25 +702,18 @@ void xcomp_send_mouse_up(xcomp_root* root, xcomp_event_data info)
         if (last_comp->flags & XCOMP_FLAG_IS_MOUSE_RIGHT_DOWN)
         {
             last_comp->flags &= ~XCOMP_FLAG_IS_MOUSE_RIGHT_DOWN;
-            last_comp->event_handler(
-                last_comp,
-                XCOMP_EVENT_MOUSE_RIGHT_UP,
-                info);
+            last_comp->event_handler(last_comp, XCOMP_EVENT_MOUSE_RIGHT_UP, info);
         }
 
         if (last_comp == comp)
         {
             // We probably don't care about right double clicks
-            last_comp->event_handler(
-                last_comp,
-                XCOMP_EVENT_MOUSE_RIGHT_CLICK,
-                info);
+            last_comp->event_handler(last_comp, XCOMP_EVENT_MOUSE_RIGHT_CLICK, info);
         }
     }
 
     // handle middle button
-    if ((info.modifiers & XCOMP_MOD_MIDDLE_BUTTON) &&
-        root->mouse_middle_down != NULL)
+    if ((info.modifiers & XCOMP_MOD_MIDDLE_BUTTON) && root->mouse_middle_down != NULL)
     {
         xcomp_component* last_comp = root->mouse_middle_down;
         root->mouse_middle_down    = NULL;
@@ -772,24 +721,18 @@ void xcomp_send_mouse_up(xcomp_root* root, xcomp_event_data info)
         if (last_comp->flags & XCOMP_FLAG_IS_MOUSE_MIDDLE_DOWN)
         {
             last_comp->flags &= ~XCOMP_FLAG_IS_MOUSE_MIDDLE_DOWN;
-            last_comp->event_handler(
-                last_comp,
-                XCOMP_EVENT_MOUSE_MIDDLE_UP,
-                info);
+            last_comp->event_handler(last_comp, XCOMP_EVENT_MOUSE_MIDDLE_UP, info);
         }
 
         if (last_comp == comp)
         {
             // We probably don't care about middle double clicks
-            last_comp->event_handler(
-                last_comp,
-                XCOMP_EVENT_MOUSE_MIDDLE_CLICK,
-                info);
+            last_comp->event_handler(last_comp, XCOMP_EVENT_MOUSE_MIDDLE_CLICK, info);
         }
     }
 }
 
-void xcomp_send_keyboard_message(xcomp_root*, xcomp_event_data info)
+void xcomp_send_keyboard_message(xcomp_root* root, xcomp_event_data info)
 {
     // TODO
 }
@@ -802,10 +745,7 @@ void xcomp_root_clear(xcomp_root* root)
     xcomp_component* last_mouse_middle_down = root->mouse_middle_down;
     xcomp_component* last_mouse_drag_over   = root->mouse_drag_over;
     xcomp_component* last_keyboard_focus    = root->keyboard_focus;
-    xcomp_event_data edata                  = {
-                         .x         = root->position.x,
-                         .y         = root->position.y,
-                         .modifiers = 0};
+    xcomp_event_data edata                  = {.x = root->position.x, .y = root->position.y, .modifiers = 0};
 
     root->mouse_over        = NULL;
     root->mouse_left_down   = NULL;
@@ -817,28 +757,19 @@ void xcomp_root_clear(xcomp_root* root)
 
     if (last_mouse_drag_over != NULL)
     {
-        last_mouse_drag_over->event_handler(
-            last_mouse_drag_over,
-            XCOMP_EVENT_DRAG_EXIT,
-            edata);
+        last_mouse_drag_over->event_handler(last_mouse_drag_over, XCOMP_EVENT_DRAG_EXIT, edata);
     }
 
     if (last_mouse_middle_down != NULL)
     {
         last_mouse_middle_down->flags &= ~XCOMP_FLAG_IS_MOUSE_MIDDLE_DOWN;
-        last_mouse_middle_down->event_handler(
-            last_mouse_middle_down,
-            XCOMP_EVENT_MOUSE_MIDDLE_UP,
-            edata);
+        last_mouse_middle_down->event_handler(last_mouse_middle_down, XCOMP_EVENT_MOUSE_MIDDLE_UP, edata);
     }
 
     if (last_mouse_right_down != NULL)
     {
         last_mouse_right_down->flags &= ~XCOMP_FLAG_IS_MOUSE_RIGHT_DOWN;
-        last_mouse_right_down->event_handler(
-            last_mouse_right_down,
-            XCOMP_EVENT_MOUSE_RIGHT_UP,
-            edata);
+        last_mouse_right_down->event_handler(last_mouse_right_down, XCOMP_EVENT_MOUSE_RIGHT_UP, edata);
     }
 
     if (last_mouse_left_down != NULL)
@@ -846,17 +777,11 @@ void xcomp_root_clear(xcomp_root* root)
         if (last_mouse_left_down->flags & XCOMP_FLAG_IS_DRAGGING)
         {
             last_mouse_left_down->flags &= ~XCOMP_FLAG_IS_DRAGGING;
-            last_mouse_left_down->event_handler(
-                last_mouse_left_down,
-                XCOMP_EVENT_DRAG_END,
-                edata);
+            last_mouse_left_down->event_handler(last_mouse_left_down, XCOMP_EVENT_DRAG_END, edata);
         }
 
         last_mouse_left_down->flags &= ~XCOMP_FLAG_IS_MOUSE_LEFT_DOWN;
-        last_mouse_left_down->event_handler(
-            last_mouse_left_down,
-            XCOMP_EVENT_MOUSE_LEFT_UP,
-            edata);
+        last_mouse_left_down->event_handler(last_mouse_left_down, XCOMP_EVENT_MOUSE_LEFT_UP, edata);
     }
 
     if (last_mouse_over != NULL)
@@ -868,9 +793,8 @@ void xcomp_root_refresh(xcomp_root* root)
     xcomp_root_clear(root);
 
     // find new component for mouse to be over
-    xcomp_send_mouse_position(
-        root,
-        {.x = root->position.x, .y = root->position.y, .modifiers = 0});
+    xcomp_event_data data = {.x = root->position.x, .y = root->position.y, .modifiers = 0};
+    xcomp_send_mouse_position(root, data);
 }
 
 #ifdef __cplusplus

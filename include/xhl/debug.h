@@ -12,6 +12,7 @@
 
 #ifdef __cplusplus
 #define XHL_DEBUG_RESTRICT
+extern "C" {
 #else
 #define XHL_DEBUG_RESTRICT restrict
 #endif
@@ -19,9 +20,13 @@
 // Prints to VSCode debug console properly, unlike regular printf...
 void xprintf(const char* XHL_DEBUG_RESTRICT fmt, ...);
 
+#ifdef __cplusplus
+}
+#endif
+
 #ifdef XHL_DEBUG_IMPL
 
-#ifndef DEBUG
+#ifndef _DEBUG
 #error "Don't print in release!"
 #endif
 
