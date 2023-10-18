@@ -349,7 +349,7 @@ void xthread_set_high_priority(void)
     pthread_setschedparam(pthread_self(), SCHED_RR, &sp);
 }
 
-_Static_assert(sizeof(xt_mutex_t) < sizeof(pthread_mutex_t) ? 0 : 1, "Mutex too smol...");
+_Static_assert(sizeof(xt_mutex_t) >= sizeof(pthread_mutex_t), "Mutex too smol...");
 void xthread_mutex_init(xt_mutex_t* mutex) { pthread_mutex_init((pthread_mutex_t*)mutex, NULL); }
 void xthread_mutex_term(xt_mutex_t* mutex) { pthread_mutex_destroy((pthread_mutex_t*)mutex); }
 void xthread_mutex_lock(xt_mutex_t* mutex) { pthread_mutex_lock((pthread_mutex_t*)mutex); }
@@ -383,7 +383,7 @@ struct xthread_internal_signal_t
     int             value;
 #endif
 };
-_Static_assert(sizeof(struct xthread_internal_signal_t) < sizeof(xt_signal_t), "too smol");
+_Static_assert(sizeof(xt_signal_t) >= sizeof(struct xthread_internal_signal_t), "too smol");
 
 void xthread_signal_init(xt_signal_t* signal)
 {
