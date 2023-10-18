@@ -241,25 +241,15 @@ struct xt_queue_t
 #ifdef XHL_THREAD_IMPL
 #undef XHL_THREAD_IMPL
 
-#ifndef THREAD_ASSERT
-#undef _CRT_NONSTDC_NO_DEPRECATE
-#define _CRT_NONSTDC_NO_DEPRECATE
-#undef _CRT_SECURE_NO_WARNINGS
-#define _CRT_SECURE_NO_WARNINGS
 #include <assert.h>
 #define THREAD_ASSERT(expression, message) assert((expression) && (message))
-#endif
 
 #if defined(_WIN32)
 
 #pragma comment(lib, "winmm.lib")
 
-#define _CRT_NONSTDC_NO_DEPRECATE
-#define _CRT_SECURE_NO_WARNINGS
-
-#if ! defined(_WIN32_WINNT) || _WIN32_WINNT < 0x0501
-#undef _WIN32_WINNT
-#define _WIN32_WINNT 0x501 // requires Windows XP minimum
+#if ! defined(_WIN32_WINNT) || _WIN32_WINNT < 0x0600
+#error "Requires Windows Vista or greater"
 #endif
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -384,46 +374,29 @@ void* xthread_tls_get(xt_tls_t tls)              { return pthread_getspecific((p
 struct xthread_internal_signal_t
 {
 #if defined(_WIN32)
-#if _WIN32_WINNT >= 0x0600
     CRITICAL_SECTION   mutex;
     CONDITION_VARIABLE condition;
     int                value;
-#else
-#pragma message("Warning: _WIN32_WINNT < 0x0600 - condition variables not available")
-    HANDLE event;
-#endif
 #elif defined(__linux__) || defined(__APPLE__) || defined(__ANDROID__)
     pthread_mutex_t mutex;
     pthread_cond_t  condition;
     int             value;
 #endif
 };
+_Static_assert(sizeof(struct xthread_internal_signal_t) < sizeof(xt_signal_t), "too smol");
 
 void xthread_signal_init(xt_signal_t* signal)
 {
-    // Compile-time size check
-    struct x
-    {
-        char thread_signal_type_too_small : (sizeof(xt_signal_t) < sizeof(struct xthread_internal_signal_t) ? 0 : 1);
-    };
-
     struct xthread_internal_signal_t* internal = (struct xthread_internal_signal_t*)signal;
 
 #if defined(_WIN32)
-
-#if _WIN32_WINNT >= 0x0600
     InitializeCriticalSectionAndSpinCount(&internal->mutex, 32);
     InitializeConditionVariable(&internal->condition);
     internal->value = 0;
-#else
-    internal->event = CreateEvent(NULL, FALSE, FALSE, NULL);
-#endif
-
 #elif defined(__linux__) || defined(__APPLE__) || defined(__ANDROID__)
     pthread_mutex_init(&internal->mutex, NULL);
     pthread_cond_init(&internal->condition, NULL);
     internal->value = 0;
-
 #endif
 }
 
@@ -432,13 +405,7 @@ void xthread_signal_term(xt_signal_t* signal)
     struct xthread_internal_signal_t* internal = (struct xthread_internal_signal_t*)signal;
 
 #if defined(_WIN32)
-
-#if _WIN32_WINNT >= 0x0600
     DeleteCriticalSection(&internal->mutex);
-#else
-    CloseHandle(internal->event);
-#endif
-
 #elif defined(__linux__) || defined(__APPLE__) || defined(__ANDROID__)
     pthread_mutex_destroy(&internal->mutex);
     pthread_cond_destroy(&internal->condition);
@@ -450,16 +417,10 @@ void xthread_signal_raise(xt_signal_t* signal)
     struct xthread_internal_signal_t* internal = (struct xthread_internal_signal_t*)signal;
 
 #if defined(_WIN32)
-
-#if _WIN32_WINNT >= 0x0600
     EnterCriticalSection(&internal->mutex);
     internal->value = 1;
     LeaveCriticalSection(&internal->mutex);
     WakeConditionVariable(&internal->condition);
-#else
-    SetEvent(internal->event);
-#endif
-
 #elif defined(__linux__) || defined(__APPLE__) || defined(__ANDROID__)
     pthread_mutex_lock(&internal->mutex);
     internal->value = 1;
@@ -474,7 +435,6 @@ int xthread_signal_wait(xt_signal_t* signal, int timeout_ms)
 
 #if defined(_WIN32)
 
-#if _WIN32_WINNT >= 0x0600
     int timed_out = 0;
     EnterCriticalSection(&internal->mutex);
     while (internal->value == 0)
@@ -490,10 +450,6 @@ int xthread_signal_wait(xt_signal_t* signal, int timeout_ms)
     internal->value = 0;
     LeaveCriticalSection(&internal->mutex);
     return ! timed_out;
-#else
-    int failed = WAIT_OBJECT_0 != WaitForSingleObject(internal->event, timeout_ms < 0 ? INFINITE : timeout_ms);
-    return ! failed;
-#endif
 
 #elif defined(__linux__) || defined(__APPLE__) || defined(__ANDROID__)
 
@@ -530,13 +486,6 @@ int xthread_signal_wait(xt_signal_t* signal, int timeout_ms)
 void xthread_timer_init(xt_timer_t* timer)
 {
 #if defined(_WIN32)
-
-    // Compile-time size check
-    struct x
-    {
-        char thread_timer_type_too_small : (sizeof(xt_mutex_t) < sizeof(HANDLE) ? 0 : 1);
-    };
-
     TIMECAPS tc;
     if (timeGetDevCaps(&tc, sizeof(TIMECAPS)) == TIMERR_NOERROR)
         timeBeginPeriod(tc.wPeriodMin);
