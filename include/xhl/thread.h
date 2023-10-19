@@ -38,6 +38,8 @@ typedef union  xt_signal_t xt_signal_t;
 typedef union  xt_timer_t  xt_timer_t;
 typedef struct xt_queue_t  xt_queue_t;
 
+typedef volatile unsigned char xt_spinlock_t;
+
 xt_thread_ptr_t xthread_current(void);
 xt_thread_ptr_t xthread_create(int (*thread_proc)(void*), void* user_data, int stack_size);
 
@@ -69,83 +71,83 @@ enum xt_memory_order
     xt_memory_order_seq_cst = __ATOMIC_SEQ_CST,
 };
 
-#define xt_atomic_load_u8 (ptr)          __atomic_load_n(           (ptr), __ATOMIC_SEQ_CST)
+#define xt_atomic_load_u8( ptr)          __atomic_load_n(           (ptr), __ATOMIC_SEQ_CST)
 #define xt_atomic_load_u16(ptr)          __atomic_load_n(           (ptr), __ATOMIC_SEQ_CST)
 #define xt_atomic_load_u32(ptr)          __atomic_load_n(           (ptr), __ATOMIC_SEQ_CST)
 #define xt_atomic_load_u64(ptr)          __atomic_load_n(           (ptr), __ATOMIC_SEQ_CST)
-#define xt_atomic_load_i8 (ptr) (int8_t) __atomic_load_n((uint8_t*) (ptr), __ATOMIC_SEQ_CST)
+#define xt_atomic_load_i8( ptr) (int8_t) __atomic_load_n((uint8_t*) (ptr), __ATOMIC_SEQ_CST)
 #define xt_atomic_load_i16(ptr) (int16_t)__atomic_load_n((uint16_t*)(ptr), __ATOMIC_SEQ_CST)
 #define xt_atomic_load_i32(ptr) (int32_t)__atomic_load_n((uint32_t*)(ptr), __ATOMIC_SEQ_CST)
 #define xt_atomic_load_i64(ptr) (int64_t)__atomic_load_n((uint64_t*)(ptr), __ATOMIC_SEQ_CST)
 
-#define xt_atomic_store_u8 (ptr, v) __atomic_store_n(           (ptr), (v), __ATOMIC_SEQ_CST)
+#define xt_atomic_store_u8( ptr, v) __atomic_store_n(           (ptr), (v), __ATOMIC_SEQ_CST)
 #define xt_atomic_store_u16(ptr, v) __atomic_store_n(           (ptr), (v), __ATOMIC_SEQ_CST)
 #define xt_atomic_store_u32(ptr, v) __atomic_store_n(           (ptr), (v), __ATOMIC_SEQ_CST)
 #define xt_atomic_store_u64(ptr, v) __atomic_store_n(           (ptr), (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_store_i8 (ptr, v) __atomic_store_n((uint8_t*) (ptr), (v), __ATOMIC_SEQ_CST)
+#define xt_atomic_store_i8( ptr, v) __atomic_store_n((uint8_t*) (ptr), (v), __ATOMIC_SEQ_CST)
 #define xt_atomic_store_i16(ptr, v) __atomic_store_n((uint16_t*)(ptr), (v), __ATOMIC_SEQ_CST)
 #define xt_atomic_store_i32(ptr, v) __atomic_store_n((uint32_t*)(ptr), (v), __ATOMIC_SEQ_CST)
 #define xt_atomic_store_i64(ptr, v) __atomic_store_n((uint64_t*)(ptr), (v), __ATOMIC_SEQ_CST)
 
-#define xt_atomic_exchange_u8 (ptr, v)          __atomic_exchange_n(           (ptr), (v), __ATOMIC_SEQ_CST)
+#define xt_atomic_exchange_u8( ptr, v)          __atomic_exchange_n(           (ptr), (v), __ATOMIC_SEQ_CST)
 #define xt_atomic_exchange_u16(ptr, v)          __atomic_exchange_n(           (ptr), (v), __ATOMIC_SEQ_CST)
 #define xt_atomic_exchange_u32(ptr, v)          __atomic_exchange_n(           (ptr), (v), __ATOMIC_SEQ_CST)
 #define xt_atomic_exchange_u64(ptr, v)          __atomic_exchange_n(           (ptr), (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_exchange_i8 (ptr, v) (int8_t) __atomic_exchange_n((uint8_t*) (ptr), (v), __ATOMIC_SEQ_CST)
+#define xt_atomic_exchange_i8( ptr, v) (int8_t) __atomic_exchange_n((uint8_t*) (ptr), (v), __ATOMIC_SEQ_CST)
 #define xt_atomic_exchange_i16(ptr, v) (int16_t)__atomic_exchange_n((uint16_t*)(ptr), (v), __ATOMIC_SEQ_CST)
 #define xt_atomic_exchange_i32(ptr, v) (int32_t)__atomic_exchange_n((uint32_t*)(ptr), (v), __ATOMIC_SEQ_CST)
 #define xt_atomic_exchange_i64(ptr, v) (int64_t)__atomic_exchange_n((uint64_t*)(ptr), (v), __ATOMIC_SEQ_CST)
 
-#define xt_atomic_fetch_add_u8 (ptr, v)          __atomic_fetch_add(           (ptr),           (v), __ATOMIC_SEQ_CST)
+#define xt_atomic_fetch_add_u8( ptr, v)          __atomic_fetch_add(           (ptr),           (v), __ATOMIC_SEQ_CST)
 #define xt_atomic_fetch_add_u16(ptr, v)          __atomic_fetch_add(           (ptr),           (v), __ATOMIC_SEQ_CST)
 #define xt_atomic_fetch_add_u32(ptr, v)          __atomic_fetch_add(           (ptr),           (v), __ATOMIC_SEQ_CST)
 #define xt_atomic_fetch_add_u64(ptr, v)          __atomic_fetch_add(           (ptr),           (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_add_i8 (ptr, v) (int8_t) __atomic_fetch_add((uint8_t*) (ptr), (uint8_t) (v), __ATOMIC_SEQ_CST)
+#define xt_atomic_fetch_add_i8( ptr, v) (int8_t) __atomic_fetch_add((uint8_t*) (ptr), (uint8_t) (v), __ATOMIC_SEQ_CST)
 #define xt_atomic_fetch_add_i16(ptr, v) (int16_t)__atomic_fetch_add((uint16_t*)(ptr), (uint16_t)(v), __ATOMIC_SEQ_CST)
 #define xt_atomic_fetch_add_i32(ptr, v) (int32_t)__atomic_fetch_add((uint32_t*)(ptr), (uint32_t)(v), __ATOMIC_SEQ_CST)
 #define xt_atomic_fetch_add_i64(ptr, v) (int64_t)__atomic_fetch_add((uint64_t*)(ptr), (uint64_t)(v), __ATOMIC_SEQ_CST)
 
-#define xt_atomic_fetch_sub_u8 (ptr, v)          __atomic_fetch_sub(           (ptr),           (v), __ATOMIC_SEQ_CST)
+#define xt_atomic_fetch_sub_u8( ptr, v)          __atomic_fetch_sub(           (ptr),           (v), __ATOMIC_SEQ_CST)
 #define xt_atomic_fetch_sub_u16(ptr, v)          __atomic_fetch_sub(           (ptr),           (v), __ATOMIC_SEQ_CST)
 #define xt_atomic_fetch_sub_u32(ptr, v)          __atomic_fetch_sub(           (ptr),           (v), __ATOMIC_SEQ_CST)
 #define xt_atomic_fetch_sub_u64(ptr, v)          __atomic_fetch_sub(           (ptr),           (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_sub_i8 (ptr, v) (int8_t) __atomic_fetch_sub((uint8_t*) (ptr), (uint8_t) (v), __ATOMIC_SEQ_CST)
+#define xt_atomic_fetch_sub_i8( ptr, v) (int8_t) __atomic_fetch_sub((uint8_t*) (ptr), (uint8_t) (v), __ATOMIC_SEQ_CST)
 #define xt_atomic_fetch_sub_i16(ptr, v) (int16_t)__atomic_fetch_sub((uint16_t*)(ptr), (uint16_t)(v), __ATOMIC_SEQ_CST)
 #define xt_atomic_fetch_sub_i32(ptr, v) (int32_t)__atomic_fetch_sub((uint32_t*)(ptr), (uint32_t)(v), __ATOMIC_SEQ_CST)
 #define xt_atomic_fetch_sub_i64(ptr, v) (int64_t)__atomic_fetch_sub((uint64_t*)(ptr), (uint64_t)(v), __ATOMIC_SEQ_CST)
 
-#define xt_atomic_fetch_and_u8 (ptr, v)          __atomic_fetch_and(           (ptr),           (v), __ATOMIC_SEQ_CST)
+#define xt_atomic_fetch_and_u8( ptr, v)          __atomic_fetch_and(           (ptr),           (v), __ATOMIC_SEQ_CST)
 #define xt_atomic_fetch_and_u16(ptr, v)          __atomic_fetch_and(           (ptr),           (v), __ATOMIC_SEQ_CST)
 #define xt_atomic_fetch_and_u32(ptr, v)          __atomic_fetch_and(           (ptr),           (v), __ATOMIC_SEQ_CST)
 #define xt_atomic_fetch_and_u64(ptr, v)          __atomic_fetch_and(           (ptr),           (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_and_i8 (ptr, v) (int8_t) __atomic_fetch_and((uint8_t*) (ptr), (uint8_t) (v), __ATOMIC_SEQ_CST)
+#define xt_atomic_fetch_and_i8( ptr, v) (int8_t) __atomic_fetch_and((uint8_t*) (ptr), (uint8_t) (v), __ATOMIC_SEQ_CST)
 #define xt_atomic_fetch_and_i16(ptr, v) (int16_t)__atomic_fetch_and((uint16_t*)(ptr), (uint16_t)(v), __ATOMIC_SEQ_CST)
 #define xt_atomic_fetch_and_i32(ptr, v) (int32_t)__atomic_fetch_and((uint32_t*)(ptr), (uint32_t)(v), __ATOMIC_SEQ_CST)
 #define xt_atomic_fetch_and_i64(ptr, v) (int64_t)__atomic_fetch_and((uint64_t*)(ptr), (uint64_t)(v), __ATOMIC_SEQ_CST)
 
-#define xt_atomic_fetch_nand_u8 (ptr, v)          __atomic_fetch_nand(           (ptr),           (v), __ATOMIC_SEQ_CST)
+#define xt_atomic_fetch_nand_u8( ptr, v)          __atomic_fetch_nand(           (ptr),           (v), __ATOMIC_SEQ_CST)
 #define xt_atomic_fetch_nand_u16(ptr, v)          __atomic_fetch_nand(           (ptr),           (v), __ATOMIC_SEQ_CST)
 #define xt_atomic_fetch_nand_u32(ptr, v)          __atomic_fetch_nand(           (ptr),           (v), __ATOMIC_SEQ_CST)
 #define xt_atomic_fetch_nand_u64(ptr, v)          __atomic_fetch_nand(           (ptr),           (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_nand_i8 (ptr, v) (int8_t) __atomic_fetch_nand((uint8_t*) (ptr), (uint8_t) (v), __ATOMIC_SEQ_CST)
+#define xt_atomic_fetch_nand_i8( ptr, v) (int8_t) __atomic_fetch_nand((uint8_t*) (ptr), (uint8_t) (v), __ATOMIC_SEQ_CST)
 #define xt_atomic_fetch_nand_i16(ptr, v) (int16_t)__atomic_fetch_nand((uint16_t*)(ptr), (uint16_t)(v), __ATOMIC_SEQ_CST)
 #define xt_atomic_fetch_nand_i32(ptr, v) (int32_t)__atomic_fetch_nand((uint32_t*)(ptr), (uint32_t)(v), __ATOMIC_SEQ_CST)
 #define xt_atomic_fetch_nand_i64(ptr, v) (int64_t)__atomic_fetch_nand((uint64_t*)(ptr), (uint64_t)(v), __ATOMIC_SEQ_CST)
 
-#define xt_atomic_fetch_or_u8 (ptr, v)          __atomic_fetch_or(           (ptr),           (v), __ATOMIC_SEQ_CST)
+#define xt_atomic_fetch_or_u8( ptr, v)          __atomic_fetch_or(           (ptr),           (v), __ATOMIC_SEQ_CST)
 #define xt_atomic_fetch_or_u16(ptr, v)          __atomic_fetch_or(           (ptr),           (v), __ATOMIC_SEQ_CST)
 #define xt_atomic_fetch_or_u32(ptr, v)          __atomic_fetch_or(           (ptr),           (v), __ATOMIC_SEQ_CST)
 #define xt_atomic_fetch_or_u64(ptr, v)          __atomic_fetch_or(           (ptr),           (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_or_i8 (ptr, v) (int8_t) __atomic_fetch_or((uint8_t*) (ptr), (uint8_t) (v), __ATOMIC_SEQ_CST)
+#define xt_atomic_fetch_or_i8( ptr, v) (int8_t) __atomic_fetch_or((uint8_t*) (ptr), (uint8_t) (v), __ATOMIC_SEQ_CST)
 #define xt_atomic_fetch_or_i16(ptr, v) (int16_t)__atomic_fetch_or((uint16_t*)(ptr), (uint16_t)(v), __ATOMIC_SEQ_CST)
 #define xt_atomic_fetch_or_i32(ptr, v) (int32_t)__atomic_fetch_or((uint32_t*)(ptr), (uint32_t)(v), __ATOMIC_SEQ_CST)
 #define xt_atomic_fetch_or_i64(ptr, v) (int64_t)__atomic_fetch_or((uint64_t*)(ptr), (uint64_t)(v), __ATOMIC_SEQ_CST)
 
-#define xt_atomic_fetch_xor_u8 (ptr, v)          __atomic_fetch_xor(           (ptr),           (v), __ATOMIC_SEQ_CST)
+#define xt_atomic_fetch_xor_u8( ptr, v)          __atomic_fetch_xor(           (ptr),           (v), __ATOMIC_SEQ_CST)
 #define xt_atomic_fetch_xor_u16(ptr, v)          __atomic_fetch_xor(           (ptr),           (v), __ATOMIC_SEQ_CST)
 #define xt_atomic_fetch_xor_u32(ptr, v)          __atomic_fetch_xor(           (ptr),           (v), __ATOMIC_SEQ_CST)
 #define xt_atomic_fetch_xor_u64(ptr, v)          __atomic_fetch_xor(           (ptr),           (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_xor_i8 (ptr, v) (int8_t) __atomic_fetch_xor((uint8_t*) (ptr), (uint8_t) (v), __ATOMIC_SEQ_CST)
+#define xt_atomic_fetch_xor_i8( ptr, v) (int8_t) __atomic_fetch_xor((uint8_t*) (ptr), (uint8_t) (v), __ATOMIC_SEQ_CST)
 #define xt_atomic_fetch_xor_i16(ptr, v) (int16_t)__atomic_fetch_xor((uint16_t*)(ptr), (uint16_t)(v), __ATOMIC_SEQ_CST)
 #define xt_atomic_fetch_xor_i32(ptr, v) (int32_t)__atomic_fetch_xor((uint32_t*)(ptr), (uint32_t)(v), __ATOMIC_SEQ_CST)
 #define xt_atomic_fetch_xor_i64(ptr, v) (int64_t)__atomic_fetch_xor((uint64_t*)(ptr), (uint64_t)(v), __ATOMIC_SEQ_CST)
@@ -197,6 +199,12 @@ int   xthread_queue_produce(xt_queue_t* queue, void* value, int timeout_ms);
 void* xthread_queue_consume(xt_queue_t* queue, int timeout_ms);
 int   xthread_queue_count(xt_queue_t* queue);
 
+// Progressive backoff spinlock based on Timur Doumler's ADC 2020 talk
+// https://www.youtube.com/watch?v=zrWYJ6FdOFQ
+void xt_spinlock_lock(xt_spinlock_t* ptr);
+#define xt_spinlock_trylock(ptr) __atomic_exchange_n((ptr), 1, __ATOMIC_ACQUIRE)
+#define xt_spinlock_unlock( ptr) __atomic_store_n   ((ptr), 0, __ATOMIC_RELEASE)
+
 union xt_mutex_t
 {
     void* align;
@@ -240,6 +248,18 @@ struct xt_queue_t
 
 #ifdef XHL_THREAD_IMPL
 #undef XHL_THREAD_IMPL
+
+#if __SSE2__
+// Used for _mm_pause()
+// https://www.intel.com/content/www/us/en/docs/cpp-compiler/developer-guide-reference/2021-10/pause-intrinsic.html
+#include <emmintrin.h>
+#elif __arm64__
+// Used for __wfe()
+// https://developer.arm.com/documentation/dui0375/g/Compiler-specific-Features/--wfe-intrinsic
+#include <arm_acle.h>
+#else
+#error "Microarchitecture not supported!"
+#endif
 
 #include <assert.h>
 #define THREAD_ASSERT(expression, message) assert((expression) && (message))
@@ -596,6 +616,92 @@ void* xthread_queue_consume(xt_queue_t* queue, int timeout_ms)
 }
 
 int xthread_queue_count(xt_queue_t* queue) { return xt_atomic_load_i32(&queue->count); }
+
+void xt_spinlock_lock(xt_atomic_uint8_t* ptr)
+{
+#ifdef __SSE2__
+
+    // Stage 1: ~25ns
+    for (int i = 0; i < 5; i++)
+        if (xt_spinlock_trylock(ptr))
+            return;
+
+    // Stage 2: ~400ns
+    for (int i = 0; i < 10; i++)
+    {
+        if (xt_spinlock_trylock(ptr))
+            return;
+
+        _mm_pause();
+    }
+
+    // Stage 3: ~400ns
+    for (int i = 0; i < 3000; i++)
+    {
+        if (xt_spinlock_trylock(ptr))
+            return;
+
+        _mm_pause();
+        _mm_pause();
+        _mm_pause();
+        _mm_pause();
+        _mm_pause();
+        _mm_pause();
+        _mm_pause();
+        _mm_pause();
+        _mm_pause();
+        _mm_pause();
+
+        xthread_yield();
+    }
+
+#elif defined(__arm64__)
+
+    // Stage 1: ~20ns
+    for (int i = 0; i < 5; i++)
+        if (xt_spinlock_trylock(ptr))
+            return;
+
+    // Stage 2: ~1ms
+    for (int i = 0; i < 750; i++)
+    {
+        if (xt_spinlock_trylock(ptr))
+            return;
+
+        __wfe(); // ~1300ns
+
+        xthread_yield();
+    }
+#endif
+/*
+NOTE: only this function is under the Boost license
+https://github.com/crill-dev/crill
+
+Boost Software License - Version 1.0 - August 17th, 2003
+
+Permission is hereby granted, free of charge, to any person or organization
+obtaining a copy of the software and accompanying documentation covered by
+this license (the "Software") to use, reproduce, display, distribute,
+execute, and transmit the Software, and to prepare derivative works of the
+Software, and to permit third-parties to whom the Software is furnished to
+do so, all subject to the following:
+
+The copyright notices in the Software and this entire statement, including
+the above license grant, this restriction and the following disclaimer,
+must be included in all copies of the Software, in whole or in part, and
+all derivative works of the Software, unless such copies or derivative
+works are solely in the form of machine-executable object code generated by
+a source language processor.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, TITLE AND NON-INFRINGEMENT. IN NO EVENT
+SHALL THE COPYRIGHT HOLDERS OR ANYONE DISTRIBUTING THE SOFTWARE BE LIABLE
+FOR ANY DAMAGES OR OTHER LIABILITY, WHETHER IN CONTRACT, TORT OR OTHERWISE,
+ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+*/
+}
 
 #endif /* XHL_THREAD_IMPL */
 // clang-format on
