@@ -25,6 +25,7 @@ void xprintf(const char* XHL_DEBUG_RESTRICT fmt, ...);
 #endif
 
 #ifdef XHL_DEBUG_IMPL
+#undef XHL_DEBUG_IMPL
 
 #ifndef _DEBUG
 #error "Don't print in release!"
@@ -37,7 +38,7 @@ void xprintf(const char* XHL_DEBUG_RESTRICT fmt, ...);
 void xprintf(const char* XHL_DEBUG_RESTRICT fmt, ...)
 {
     va_list args;
-    char    buf[64];
+    char    buf[128];
 
     va_start(args, fmt);
     vsnprintf(buf, sizeof(buf), fmt, args);

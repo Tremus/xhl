@@ -1,12 +1,13 @@
 // Checking it compiles...
 #define XHL_MALLOC_IMPL
-#include "./include/xhl/debug.h"
+
 #include "./include/xhl/malloc.h"
 
 #define XARR_REALLOC(ptr, size) xrealloc(ptr, size)
 #define XARR_FREE(ptr) xfree(ptr)
 
 #include "./include/xhl/array.h"
+#include "./include/xhl/debug.h"
 
 #include <stdio.h>
 

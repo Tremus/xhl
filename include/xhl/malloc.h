@@ -18,11 +18,12 @@ void  xfree(void*);
 #endif
 
 #ifdef XHL_MALLOC_IMPL
+#undef XHL_MALLOC_IMPL
 #include <errno.h>
 #include <stdlib.h>
 
 #ifdef _DEBUG
-#include <xhl/debug.h>
+#include "./debug.h"
 // Not recommended for debugging in multi-instance & multi-threaded contexts.
 int g_num_xmallocs = 0;
 #endif
