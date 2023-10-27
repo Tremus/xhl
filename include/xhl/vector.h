@@ -34,8 +34,9 @@ typedef union
     struct { float height, width; };
     struct { float h, w; };
     struct { float real, imag; };
-    struct { float magnitude, angle; };
-    struct { float mag, theta; };
+    struct { float re, im; };
+    struct { float angle, magnitude; };
+    struct { float phase, mag; };
     float data[2];
 } xvec2f;
 
