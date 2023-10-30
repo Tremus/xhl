@@ -1,4 +1,5 @@
-#pragma once
+#ifndef XHL_COMPONENT_H
+#define XHL_COMPONENT_H
 
 /**
  * Quick and dirty component heirachy.
@@ -276,9 +277,10 @@ bool xcomp_is_enabled(xcomp_component* comp)
 #ifdef __cplusplus
 }
 #endif
+#endif // XHL_COMPONENT_H
 
-// #define XHL_COMPONENT_IMPL
 #ifdef XHL_COMPONENT_IMPL
+#undef XHL_COMPONENT_IMPL
 
 #ifdef __cplusplus
 extern "C" {

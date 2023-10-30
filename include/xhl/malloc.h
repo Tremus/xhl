@@ -1,4 +1,5 @@
-#pragma once
+#ifndef XHL_MALLOC_H
+#define XHL_MALLOC_H
 // Quick and dirty xmalloc
 
 #include <stddef.h>
@@ -16,6 +17,7 @@ void  xfree(void*);
 #ifdef __cplusplus
 }
 #endif
+#endif // XHL_MALLOC_H
 
 #ifdef XHL_MALLOC_IMPL
 #undef XHL_MALLOC_IMPL

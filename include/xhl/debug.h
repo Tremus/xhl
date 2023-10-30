@@ -1,4 +1,5 @@
-#pragma once
+#ifndef XHL_DEBUG_H
+#define XHL_DEBUG_H
 
 #ifdef _MSC_VER
 #define XHL_DEBUG_BREAK __debugbreak()
@@ -23,6 +24,7 @@ void xprintf(const char* XHL_DEBUG_RESTRICT fmt, ...);
 #ifdef __cplusplus
 }
 #endif
+#endif // XHL_DEBUG_H
 
 #ifdef XHL_DEBUG_IMPL
 #undef XHL_DEBUG_IMPL
@@ -38,7 +40,7 @@ void xprintf(const char* XHL_DEBUG_RESTRICT fmt, ...);
 void xprintf(const char* XHL_DEBUG_RESTRICT fmt, ...)
 {
     va_list args;
-    char    buf[128];
+    char    buf[256];
 
     va_start(args, fmt);
     vsnprintf(buf, sizeof(buf), fmt, args);
