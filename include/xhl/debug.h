@@ -1,6 +1,8 @@
 #ifndef XHL_DEBUG_H
 #define XHL_DEBUG_H
 
+#if defined(DEBUG) || defined(_DEBUG)
+
 #ifdef _MSC_VER
 #define XHL_DEBUG_BREAK __debugbreak()
 #elif __APPLE__
@@ -10,6 +12,16 @@
 #endif
 
 #define xassert(cond) (cond) ? (void)0 : XHL_DEBUG_BREAK
+
+#else // NDEBUG
+#define XHL_DEBUG_BREAK
+#define xassert(cond)                                                                                                  \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        (void)(cond);                                                                                                  \
+    }                                                                                                                  \
+    while (0)
+#endif
 
 #ifdef __cplusplus
 #define XHL_DEBUG_RESTRICT
