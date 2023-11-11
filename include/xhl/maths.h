@@ -79,6 +79,7 @@ float xm_fastexp2(float p);
 float xm_midi_to_Hz(float midi);
 // Accurate to ~0.0005 dB
 float xm_fast_gain_to_dB(float gain);
+float xm_fast_dB_to_gain(float dB);
 // Denormalise to 20Hz-20kHz
 // Perfect at low and mid ranges. 0.15Hz error margin close to 20kHz
 float xm_fast_denomalise_Hz(float norm);
@@ -100,6 +101,10 @@ uint64_t xm_xorshift64(uint32_t x);
 #ifdef XHL_MATHS_IMPL
 #undef XHL_MATHS_IMPL
 #include <math.h>
+
+#define XM_TAUf 6.283185307179586f
+#define XM_PIf 3.141592653589793f
+#define XM_HALF_PIf 1.5707963267948966f
 
 union xm_fi32
 {
@@ -197,7 +202,7 @@ float xm_fastersinfull(float x)
 {
     int   k    = (int)(x * 0.15915494309189534f);
     float half = (x < 0) ? -0.5f : 0.5f;
-    return xm_fastersin((half + k) * TAUf - x);
+    return xm_fastersin((half + k) * XM_TAUf - x);
 }
 
 // https://observablehq.com/@jrus/fasttan
@@ -229,10 +234,10 @@ float xm_fastatan2(float x, float y)
     float res = xm_fastatan(atan_input);
 
     // If swapped, adjust atan output
-    res = swap ? copysignf(HALF_PIf, atan_input) - res : res;
+    res = swap ? copysignf(XM_HALF_PIf, atan_input) - res : res;
     // Adjust the result depending on the input quadrant
     if (x < 0.0f)
-        res = copysignf(PIf, y) + res;
+        res = copysignf(XM_PIf, y) + res;
 
     return res;
 }
