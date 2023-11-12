@@ -1,4 +1,5 @@
 /* Refactor of the brilliant thread.h library by mattiasgustavsson.
+ * Atomic ops have been pulled from the also brilliant c89atomic lib by David Reid
  * Comments are removed for readability, an understanding of how threads work is assumed.
  * Alignment of data is also assumed, so many unions have been removed
  * Additional 8, 16, 64bit atomic operations have been added + bitwise.
@@ -32,6 +33,7 @@ typedef volatile short     xt_atomic_int16_t;
 typedef volatile int       xt_atomic_int32_t;
 typedef volatile long long xt_atomic_int64_t;
 typedef volatile void*     xt_atomic_ptr_t;
+typedef volatile unsigned  xt_atomic_float;
 
 typedef union  xt_mutex_t  xt_mutex_t;
 typedef union  xt_signal_t xt_signal_t;
@@ -172,16 +174,33 @@ static inline bool xt_atomic_compare_exchange_strong_i16(xt_atomic_int16_t*  ptr
 static inline bool xt_atomic_compare_exchange_strong_i32(xt_atomic_int32_t*  ptr, int32_t  expected, int32_t  desired) { return __atomic_compare_exchange_n((uint32_t*)ptr, (uint32_t*)&expected, desired, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST); }
 static inline bool xt_atomic_compare_exchange_strong_i64(xt_atomic_int64_t*  ptr, int64_t  expected, int64_t  desired) { return __atomic_compare_exchange_n((uint64_t*)ptr, (uint64_t*)&expected, desired, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST); }
 
-static inline void* xt_atomic_load_ptr(xt_atomic_ptr_t* ptr) { return (void*)__atomic_load_n((uint64_t*)ptr, __ATOMIC_SEQ_CST); }
+static inline void* xt_atomic_load_ptr(const xt_atomic_ptr_t* ptr) { return (void*)__atomic_load_n((uint64_t*)ptr, __ATOMIC_SEQ_CST); }
 static inline void  xt_atomic_store_ptr(xt_atomic_ptr_t* ptr, void* v) { __atomic_store_n((uint64_t*)ptr, (uint64_t)v, __ATOMIC_SEQ_CST); }
 static inline void* xt_atomic_exchange_ptr(xt_atomic_ptr_t* ptr, void* v) { return (void*)__atomic_exchange_n((uint64_t*)ptr, (uint64_t)v, __ATOMIC_SEQ_CST); }
 static inline bool  xt_atomic_compare_exchange_strong_ptr(xt_atomic_ptr_t* ptr, void* expected, void* desired) { return        __atomic_compare_exchange_n((uint64_t*)ptr, (uint64_t*)&expected, (uint64_t)desired, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST); }
 static inline bool  xt_atomic_ompare_exchange_weak_ptr   (xt_atomic_ptr_t* ptr, void* expected, void* desired) { return        __atomic_compare_exchange_n((uint64_t*)ptr, (uint64_t*)&expected, (uint64_t)desired, true,  __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST); }
 
-void* xthread_atomic_ptr_load(xt_atomic_ptr_t* atomic);
-void  xthread_atomic_ptr_store(xt_atomic_ptr_t* atomic, void* desired);
-void* xthread_atomic_ptr_swap(xt_atomic_ptr_t* atomic, void* desired);
-void* xthread_atomic_ptr_compare_and_swap(xt_atomic_ptr_t* atomic, void* expected, void* desired);
+union xt_uif {unsigned u; int i; float f;};
+
+static inline float xt_atomic_load_f32(const xt_atomic_float* ptr)
+{
+    union xt_uif v  = {.u = xt_atomic_load_u32(ptr)};
+    return v.f;
+}
+
+static inline void xt_atomic_store_f32(xt_atomic_float* ptr, float v)
+{
+    union xt_uif a = {.f = v};
+    xt_atomic_store_u32(ptr, a.u);
+}
+
+static inline float xt_atomic_exchange_f32(xt_atomic_float* ptr, float v)
+{
+    union xt_uif a = {.f = v};
+    union xt_uif b = {.u = xt_atomic_exchange_u32(ptr, a.u)};
+    return b.f;
+}
+
 
 void xthread_timer_init(xt_timer_t* timer);
 void xthread_timer_term(xt_timer_t* timer);
