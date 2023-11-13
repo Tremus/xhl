@@ -179,12 +179,12 @@ typedef struct xcomp_root xcomp_root;
 // GEOMETRY METHODS
 
 // Check is not all 0s
-inline bool xcomp_is_empty(xcomp_dimensions d);
+static inline bool xcomp_is_empty(xcomp_dimensions d);
 // Check mouse & keyboard mod flags for popup menu
-inline bool xcomp_is_popup_menu(uint64_t mods);
+static inline bool xcomp_is_popup_menu(uint64_t mods);
 // Check coordinate lies within dimensions
-inline bool           xcomp_hit_test(xcomp_dimensions d, xcomp_position pos);
-inline xcomp_position xcomp_centre(xcomp_dimensions d);
+static inline bool           xcomp_hit_test(xcomp_dimensions d, xcomp_position pos);
+static inline xcomp_position xcomp_centre(xcomp_dimensions d);
 
 // COMPONENT METHODS
 
@@ -208,8 +208,8 @@ void xcomp_set_visible(xcomp_component* comp, bool visible);
 // You should call xcomp_root_clear() after using this!
 void xcomp_set_enabled(xcomp_component* comp, bool enabled);
 
-inline bool xcomp_is_hidden(xcomp_component*);
-inline bool xcomp_is_enabled(xcomp_component*);
+static inline bool xcomp_is_hidden(xcomp_component*);
+static inline bool xcomp_is_enabled(xcomp_component*);
 // Traverses backwards through parent hierarchy until it finds the root.
 // If you keep a pointer to your whole applicaton on your root component, then
 // this is a useful way to retrieve it inside event callbacks from any child in
