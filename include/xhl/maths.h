@@ -45,6 +45,16 @@ double xm_normd(double v, double start, double end);
 int xm_droundi(double v);
 int xm_dfloori(double v);
 
+// clang-format off
+union xm_complexf
+{
+    struct { float real, imag; };
+    struct { float re, im; };
+};
+// clang-format on
+union xm_complexf xm_cmulf(float a_re, float a_im, float b_re, float b_im);
+union xm_complexf xm_cdivf(float a_re, float a_im, float b_re, float b_im);
+
 /*%*%*%*%*%*%*%*
  % Scientific  %
  *%*%*%*%*%*%*%*/
@@ -189,6 +199,22 @@ int xm_dfloori(double d)
     union Cast c;
     c.d = d + 6755399441055743.5;
     return c.i[0];
+}
+
+union xm_complexf xm_cmulf(float a_re, float a_im, float b_re, float b_im)
+{
+    union xm_complexf c;
+    c.real = a_re * b_re - a_im * b_im;
+    c.imag = a_re * b_im + a_im * b_re;
+    return c;
+}
+
+union xm_complexf xm_cdivf(float a_re, float a_im, float b_re, float b_im)
+{
+    union xm_complexf c;
+    c.real = (a_re * b_re + a_im * b_im) / (b_re * b_re + b_im * b_im);
+    c.imag = (a_im * b_re - a_re * b_im) / (b_re * b_re + b_im * b_im);
+    return c;
 }
 
 // Paul Minieros sin
