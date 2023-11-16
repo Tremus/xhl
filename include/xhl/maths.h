@@ -45,9 +45,10 @@ double xm_normd(double v, double start, double end);
 int xm_droundi(double v);
 int xm_dfloori(double v);
 
-/* * * * * * * *
- * Scientific  *
- * * * * * * * */
+/*%*%*%*%*%*%*%*
+ % Scientific  %
+ *%*%*%*%*%*%*%*/
+
 // Rough benchmarks & margins of error were recorded for several of the following functions
 // Find them here: https://github.com/Tremus/fastmaths
 
@@ -71,9 +72,9 @@ float xm_fasterexp(float x);
 // Only ~10% faster than exp2f. Barely less accurate
 float xm_fastexp2(float p);
 
-/* * * * *
- * Fancy *
- * * * * */
+/*@*@*@*@*
+ @ Fancy @
+ *@*@*@*@*/
 
 // Convert a midi value (0-127) to Hz. Assumes A440
 float xm_midi_to_Hz(float midi);
@@ -87,6 +88,24 @@ float xm_fast_denomalise_Hz(float norm);
 float xm_fast_normalise_Hz1(float Hz);
 // More accurate around 0 & 1, less around 0.5
 float xm_fast_normalise_Hz2(float Hz);
+
+/*0*1*0*1*
+ 1 Bits  0
+ *0*1*0*1*/
+
+uint32_t xm_next_po2u(uint32_t x);
+uint64_t xm_next_po2ull(uint64_t x);
+
+// Find idx of first low bit. eg: 1 = 0, 2 = 1, 3 = 0, 4 = 2, 5 = 0, 6 = 2 etc.
+// If input is 0, the result is 64
+uint64_t xm_ctzull(uint64_t x);
+// If input is 0, the result is 32
+uint32_t xm_ctzu(uint32_t x);
+// Find idx of first high bit. eg (1ULL << 63) = 0, (1ULL << 62) = 1, etc.
+// If input is 0, the result is 64
+uint64_t xm_clzull(uint64_t x);
+// If input is 0, the result is 32
+uint32_t xm_clzu(uint32_t x);
 
 // https://en.wikipedia.org/wiki/Xorshift
 uint32_t xm_xorshift32(uint32_t x);
@@ -354,6 +373,75 @@ uint32_t xm_next_po2u(uint32_t v)
     v++;
     return v;
 }
+
+uint64_t xm_next_po2ull(uint64_t v)
+{
+    v--;
+    v |= v >> 1;
+    v |= v >> 2;
+    v |= v >> 4;
+    v |= v >> 8;
+    v |= v >> 16;
+    v |= v >> 32;
+    v++;
+    return v;
+}
+
+#if defined(__GNUC__) || defined(__clang__)
+
+uint64_t xm_ctzull(uint64_t x)
+{
+    uint64_t y = __builtin_ctzll(x);
+    return x == 0 ? 64 : y;
+}
+
+uint32_t xm_ctzu(uint32_t x)
+{
+    uint32_t y = __builtin_ctzll(x);
+    return x == 0 ? 32 : y;
+}
+
+uint64_t xm_clzull(uint64_t x)
+{
+    uint64_t y = __builtin_ctzll(x);
+    return x == 0 ? 64 : y;
+}
+
+uint32_t xm_clzu(uint32_t x)
+{
+    uint64_t y = __builtin_ctzll(x);
+    return x == 0 ? 64 : y;
+}
+#elif defined(_MSC_VER)
+
+#include <intrin.h>
+
+uint64_t xm_ctzull(uint64_t mask)
+{
+    unsigned long index;
+    return _BitScanForward64(&index, mask) ? index;
+}
+
+uint32_t xm_ctzu(uint32_t mask)
+{
+    unsigned long index;
+    return _BitScanForward(&index, mask) ? index;
+}
+
+uint64_t xm_clzull(uint64_t mask)
+{
+    unsigned long index;
+    return _BitScanReverse64(&index, mask) ? 63 - index : 64;
+}
+
+uint32_t xm_clzu(uint32_t mask)
+{
+    unsigned long index;
+    return _BitScanReverse(&index, mask) ? 31 - index : 32;
+}
+#else
+#error Unknown compiler!
+#endif
 
 uint32_t xm_xorshift32(uint32_t x)
 {
