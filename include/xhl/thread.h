@@ -65,120 +65,110 @@ int  xthread_signal_wait(xt_signal_t* signal, int timeout_ms);
 // TODO add explicit memory order to atomic ops
 enum xt_memory_order
 {
-    xt_memory_order_relaxed = __ATOMIC_RELAXED,
-    xt_memory_order_consume = __ATOMIC_CONSUME,
-    xt_memory_order_acquire = __ATOMIC_ACQUIRE,
-    xt_memory_order_release = __ATOMIC_RELEASE,
-    xt_memory_order_acq_rel = __ATOMIC_ACQ_REL,
-    xt_memory_order_seq_cst = __ATOMIC_SEQ_CST,
+    xt_memory_order_relaxed, // __ATOMIC_RELAXED
+    xt_memory_order_consume, // __ATOMIC_CONSUME
+    xt_memory_order_acquire, // __ATOMIC_ACQUIRE
+    xt_memory_order_release, // __ATOMIC_RELEASE
+    xt_memory_order_acq_rel, // __ATOMIC_ACQ_REL
+    xt_memory_order_seq_cst, // __ATOMIC_SEQ_CST
 };
 
-#define xt_atomic_load_u8( ptr)          __atomic_load_n(           (ptr), __ATOMIC_SEQ_CST)
-#define xt_atomic_load_u16(ptr)          __atomic_load_n(           (ptr), __ATOMIC_SEQ_CST)
-#define xt_atomic_load_u32(ptr)          __atomic_load_n(           (ptr), __ATOMIC_SEQ_CST)
-#define xt_atomic_load_u64(ptr)          __atomic_load_n(           (ptr), __ATOMIC_SEQ_CST)
-#define xt_atomic_load_i8( ptr) (int8_t) __atomic_load_n((uint8_t*) (ptr), __ATOMIC_SEQ_CST)
-#define xt_atomic_load_i16(ptr) (int16_t)__atomic_load_n((uint16_t*)(ptr), __ATOMIC_SEQ_CST)
-#define xt_atomic_load_i32(ptr) (int32_t)__atomic_load_n((uint32_t*)(ptr), __ATOMIC_SEQ_CST)
-#define xt_atomic_load_i64(ptr) (int64_t)__atomic_load_n((uint64_t*)(ptr), __ATOMIC_SEQ_CST)
+uint8_t  xt_atomic_load_u8 (const xt_atomic_uint8_t*);
+uint16_t xt_atomic_load_u16(const xt_atomic_uint16_t*);
+uint32_t xt_atomic_load_u32(const xt_atomic_uint32_t*);
+uint64_t xt_atomic_load_u64(const xt_atomic_uint64_t*);
+int8_t   xt_atomic_load_i8 (const xt_atomic_int8_t*);
+int16_t  xt_atomic_load_i16(const xt_atomic_int16_t*);
+int32_t  xt_atomic_load_i32(const xt_atomic_int32_t*);
+int64_t  xt_atomic_load_i64(const xt_atomic_int64_t*);
 
-#define xt_atomic_store_u8( ptr, v) __atomic_store_n(           (ptr), (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_store_u16(ptr, v) __atomic_store_n(           (ptr), (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_store_u32(ptr, v) __atomic_store_n(           (ptr), (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_store_u64(ptr, v) __atomic_store_n(           (ptr), (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_store_i8( ptr, v) __atomic_store_n((uint8_t*) (ptr), (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_store_i16(ptr, v) __atomic_store_n((uint16_t*)(ptr), (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_store_i32(ptr, v) __atomic_store_n((uint32_t*)(ptr), (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_store_i64(ptr, v) __atomic_store_n((uint64_t*)(ptr), (v), __ATOMIC_SEQ_CST)
+void xt_atomic_store_u8 (xt_atomic_uint8_t*,  uint8_t);
+void xt_atomic_store_u16(xt_atomic_uint16_t*, uint16_t);
+void xt_atomic_store_u32(xt_atomic_uint32_t*, uint32_t);
+void xt_atomic_store_u64(xt_atomic_uint64_t*, uint64_t);
+void xt_atomic_store_i8 (xt_atomic_int8_t*,   int8_t);
+void xt_atomic_store_i16(xt_atomic_int16_t*,  int16_t);
+void xt_atomic_store_i32(xt_atomic_int32_t*,  int32_t);
+void xt_atomic_store_i64(xt_atomic_int64_t*,  int64_t);
 
-#define xt_atomic_exchange_u8( ptr, v)          __atomic_exchange_n(           (ptr), (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_exchange_u16(ptr, v)          __atomic_exchange_n(           (ptr), (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_exchange_u32(ptr, v)          __atomic_exchange_n(           (ptr), (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_exchange_u64(ptr, v)          __atomic_exchange_n(           (ptr), (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_exchange_i8( ptr, v) (int8_t) __atomic_exchange_n((uint8_t*) (ptr), (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_exchange_i16(ptr, v) (int16_t)__atomic_exchange_n((uint16_t*)(ptr), (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_exchange_i32(ptr, v) (int32_t)__atomic_exchange_n((uint32_t*)(ptr), (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_exchange_i64(ptr, v) (int64_t)__atomic_exchange_n((uint64_t*)(ptr), (v), __ATOMIC_SEQ_CST)
+uint8_t  xt_atomic_exchange_u8 (xt_atomic_uint8_t*,     uint8_t);
+uint16_t xt_atomic_exchange_u16(xt_atomic_uint16_t*ptr, uint16_t);
+uint32_t xt_atomic_exchange_u32(xt_atomic_uint32_t*ptr, uint32_t);
+uint64_t xt_atomic_exchange_u64(xt_atomic_uint64_t*ptr, uint64_t);
+int8_t   xt_atomic_exchange_i8 (xt_atomic_int8_t*ptr,   int8_t);
+int16_t  xt_atomic_exchange_i16(xt_atomic_int16_t*ptr,  int16_t);
+int32_t  xt_atomic_exchange_i32(xt_atomic_int32_t*ptr,  int32_t);
+int64_t  xt_atomic_exchange_i64(xt_atomic_int64_t*ptr,  int64_t);
 
-#define xt_atomic_fetch_add_u8( ptr, v)          __atomic_fetch_add(           (ptr),           (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_add_u16(ptr, v)          __atomic_fetch_add(           (ptr),           (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_add_u32(ptr, v)          __atomic_fetch_add(           (ptr),           (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_add_u64(ptr, v)          __atomic_fetch_add(           (ptr),           (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_add_i8( ptr, v) (int8_t) __atomic_fetch_add((uint8_t*) (ptr), (uint8_t) (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_add_i16(ptr, v) (int16_t)__atomic_fetch_add((uint16_t*)(ptr), (uint16_t)(v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_add_i32(ptr, v) (int32_t)__atomic_fetch_add((uint32_t*)(ptr), (uint32_t)(v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_add_i64(ptr, v) (int64_t)__atomic_fetch_add((uint64_t*)(ptr), (uint64_t)(v), __ATOMIC_SEQ_CST)
+uint8_t xt_atomic_fetch_add_u8(xt_atomic_uint8_t*, uint8_t);
+uint16_t xt_atomic_fetch_add_u16(xt_atomic_uint16_t*ptr, uint16_t);
+uint32_t xt_atomic_fetch_add_u32(xt_atomic_uint32_t*ptr, uint32_t);
+uint64_t xt_atomic_fetch_add_u64(xt_atomic_uint64_t*ptr, uint64_t);
+int8_t xt_atomic_fetch_add_i8(xt_atomic_int8_t*ptr, int8_t);
+int16_t xt_atomic_fetch_add_i16(xt_atomic_int16_t*ptr, int16_t);
+int32_t xt_atomic_fetch_add_i32(xt_atomic_int32_t*ptr, int32_t);
+int64_t xt_atomic_fetch_add_i64(xt_atomic_int64_t*ptr, int64_t);
 
-#define xt_atomic_fetch_sub_u8( ptr, v)          __atomic_fetch_sub(           (ptr),           (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_sub_u16(ptr, v)          __atomic_fetch_sub(           (ptr),           (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_sub_u32(ptr, v)          __atomic_fetch_sub(           (ptr),           (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_sub_u64(ptr, v)          __atomic_fetch_sub(           (ptr),           (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_sub_i8( ptr, v) (int8_t) __atomic_fetch_sub((uint8_t*) (ptr), (uint8_t) (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_sub_i16(ptr, v) (int16_t)__atomic_fetch_sub((uint16_t*)(ptr), (uint16_t)(v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_sub_i32(ptr, v) (int32_t)__atomic_fetch_sub((uint32_t*)(ptr), (uint32_t)(v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_sub_i64(ptr, v) (int64_t)__atomic_fetch_sub((uint64_t*)(ptr), (uint64_t)(v), __ATOMIC_SEQ_CST)
+uint8_t xt_atomic_fetch_sub_u8(xt_atomic_uint8_t*, uint8_t);
+uint16_t xt_atomic_fetch_sub_u16(xt_atomic_uint16_t*ptr, uint16_t);
+uint32_t xt_atomic_fetch_sub_u32(xt_atomic_uint32_t*ptr, uint32_t);
+uint64_t xt_atomic_fetch_sub_u64(xt_atomic_uint64_t*ptr, uint64_t);
+int8_t xt_atomic_fetch_sub_i8(xt_atomic_int8_t*ptr, int8_t);
+int16_t xt_atomic_fetch_sub_i16(xt_atomic_int16_t*ptr, int16_t);
+int32_t xt_atomic_fetch_sub_i32(xt_atomic_int32_t*ptr, int32_t);
+int64_t xt_atomic_fetch_sub_i64(xt_atomic_int64_t*ptr, int64_t);
 
-#define xt_atomic_fetch_and_u8( ptr, v)          __atomic_fetch_and(           (ptr),           (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_and_u16(ptr, v)          __atomic_fetch_and(           (ptr),           (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_and_u32(ptr, v)          __atomic_fetch_and(           (ptr),           (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_and_u64(ptr, v)          __atomic_fetch_and(           (ptr),           (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_and_i8( ptr, v) (int8_t) __atomic_fetch_and((uint8_t*) (ptr), (uint8_t) (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_and_i16(ptr, v) (int16_t)__atomic_fetch_and((uint16_t*)(ptr), (uint16_t)(v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_and_i32(ptr, v) (int32_t)__atomic_fetch_and((uint32_t*)(ptr), (uint32_t)(v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_and_i64(ptr, v) (int64_t)__atomic_fetch_and((uint64_t*)(ptr), (uint64_t)(v), __ATOMIC_SEQ_CST)
+uint8_t xt_atomic_fetch_and_u8(xt_atomic_uint8_t*, uint8_t);
+uint16_t xt_atomic_fetch_and_u16(xt_atomic_uint16_t*ptr, uint16_t);
+uint32_t xt_atomic_fetch_and_u32(xt_atomic_uint32_t*ptr, uint32_t);
+uint64_t xt_atomic_fetch_and_u64(xt_atomic_uint64_t*ptr, uint64_t);
+int8_t xt_atomic_fetch_and_i8(xt_atomic_int8_t*ptr, int8_t);
+int16_t xt_atomic_fetch_and_i16(xt_atomic_int16_t*ptr, int16_t);
+int32_t xt_atomic_fetch_and_i32(xt_atomic_int32_t*ptr, int32_t);
+int64_t xt_atomic_fetch_and_i64(xt_atomic_int64_t*ptr, int64_t);
 
-#define xt_atomic_fetch_nand_u8( ptr, v)          __atomic_fetch_nand(           (ptr),           (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_nand_u16(ptr, v)          __atomic_fetch_nand(           (ptr),           (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_nand_u32(ptr, v)          __atomic_fetch_nand(           (ptr),           (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_nand_u64(ptr, v)          __atomic_fetch_nand(           (ptr),           (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_nand_i8( ptr, v) (int8_t) __atomic_fetch_nand((uint8_t*) (ptr), (uint8_t) (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_nand_i16(ptr, v) (int16_t)__atomic_fetch_nand((uint16_t*)(ptr), (uint16_t)(v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_nand_i32(ptr, v) (int32_t)__atomic_fetch_nand((uint32_t*)(ptr), (uint32_t)(v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_nand_i64(ptr, v) (int64_t)__atomic_fetch_nand((uint64_t*)(ptr), (uint64_t)(v), __ATOMIC_SEQ_CST)
+// GCC has __atomic_fetch_nand, but MSVC doesn't. I don't really need it so it's not inluded here
 
-#define xt_atomic_fetch_or_u8( ptr, v)          __atomic_fetch_or(           (ptr),           (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_or_u16(ptr, v)          __atomic_fetch_or(           (ptr),           (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_or_u32(ptr, v)          __atomic_fetch_or(           (ptr),           (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_or_u64(ptr, v)          __atomic_fetch_or(           (ptr),           (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_or_i8( ptr, v) (int8_t) __atomic_fetch_or((uint8_t*) (ptr), (uint8_t) (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_or_i16(ptr, v) (int16_t)__atomic_fetch_or((uint16_t*)(ptr), (uint16_t)(v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_or_i32(ptr, v) (int32_t)__atomic_fetch_or((uint32_t*)(ptr), (uint32_t)(v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_or_i64(ptr, v) (int64_t)__atomic_fetch_or((uint64_t*)(ptr), (uint64_t)(v), __ATOMIC_SEQ_CST)
+uint8_t xt_atomic_fetch_nand_u8(xt_atomic_uint8_t*, uint8_t);
+uint16_t xt_atomic_fetch_nand_u16(xt_atomic_uint16_t*ptr, uint16_t);
+uint32_t xt_atomic_fetch_nand_u32(xt_atomic_uint32_t*ptr, uint32_t);
+uint64_t xt_atomic_fetch_nand_u64(xt_atomic_uint64_t*ptr, uint64_t);
+int8_t xt_atomic_fetch_nand_i8(xt_atomic_int8_t*ptr, int8_t);
+int16_t xt_atomic_fetch_nand_i16(xt_atomic_int16_t*ptr, int16_t);
+int32_t xt_atomic_fetch_nand_i32(xt_atomic_int32_t*ptr, int32_t);
+int64_t xt_atomic_fetch_nand_i64(xt_atomic_int64_t*ptr, int64_t);
 
-#define xt_atomic_fetch_xor_u8( ptr, v)          __atomic_fetch_xor(           (ptr),           (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_xor_u16(ptr, v)          __atomic_fetch_xor(           (ptr),           (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_xor_u32(ptr, v)          __atomic_fetch_xor(           (ptr),           (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_xor_u64(ptr, v)          __atomic_fetch_xor(           (ptr),           (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_xor_i8( ptr, v) (int8_t) __atomic_fetch_xor((uint8_t*) (ptr), (uint8_t) (v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_xor_i16(ptr, v) (int16_t)__atomic_fetch_xor((uint16_t*)(ptr), (uint16_t)(v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_xor_i32(ptr, v) (int32_t)__atomic_fetch_xor((uint32_t*)(ptr), (uint32_t)(v), __ATOMIC_SEQ_CST)
-#define xt_atomic_fetch_xor_i64(ptr, v) (int64_t)__atomic_fetch_xor((uint64_t*)(ptr), (uint64_t)(v), __ATOMIC_SEQ_CST)
+uint8_t xt_atomic_fetch_or_u8(xt_atomic_uint8_t*, uint8_t);
+uint16_t xt_atomic_fetch_or_u16(xt_atomic_uint16_t*ptr, uint16_t);
+uint32_t xt_atomic_fetch_or_u32(xt_atomic_uint32_t*ptr, uint32_t);
+uint64_t xt_atomic_fetch_or_u64(xt_atomic_uint64_t*ptr, uint64_t);
+int8_t xt_atomic_fetch_or_i8(xt_atomic_int8_t*ptr, int8_t);
+int16_t xt_atomic_fetch_or_i16(xt_atomic_int16_t*ptr, int16_t);
+int32_t xt_atomic_fetch_or_i32(xt_atomic_int32_t*ptr, int32_t);
+int64_t xt_atomic_fetch_or_i64(xt_atomic_int64_t*ptr, int64_t);
 
-// Strong? Weak? When in doubt, use strong.
-// https://gcc.gnu.org/onlinedocs/gcc/_005f_005fatomic-Builtins.html#index-_005f_005fatomic_005fcompare_005fexchange_005fn
-static inline bool xt_atomic_compare_exchange_weak_u8 (xt_atomic_uint8_t*  ptr, uint8_t  expected, uint8_t  desired) { return __atomic_compare_exchange_n(           ptr,            &expected, desired, true, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST); }
-static inline bool xt_atomic_compare_exchange_weak_u16(xt_atomic_uint16_t* ptr, uint16_t expected, uint16_t desired) { return __atomic_compare_exchange_n(           ptr,            &expected, desired, true, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST); }
-static inline bool xt_atomic_compare_exchange_weak_u32(xt_atomic_uint32_t* ptr, uint32_t expected, uint32_t desired) { return __atomic_compare_exchange_n(           ptr,            &expected, desired, true, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST); }
-static inline bool xt_atomic_compare_exchange_weak_u64(xt_atomic_uint64_t* ptr, uint64_t expected, uint64_t desired) { return __atomic_compare_exchange_n(           ptr,            &expected, desired, true, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST); }
-static inline bool xt_atomic_compare_exchange_weak_i8 (xt_atomic_int8_t*   ptr, int8_t   expected, int8_t   desired) { return __atomic_compare_exchange_n((uint8_t*) ptr, (uint8_t*) &expected, desired, true, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST); }
-static inline bool xt_atomic_compare_exchange_weak_i16(xt_atomic_int16_t*  ptr, int16_t  expected, int16_t  desired) { return __atomic_compare_exchange_n((uint16_t*)ptr, (uint16_t*)&expected, desired, true, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST); }
-static inline bool xt_atomic_compare_exchange_weak_i32(xt_atomic_int32_t*  ptr, int32_t  expected, int32_t  desired) { return __atomic_compare_exchange_n((uint32_t*)ptr, (uint32_t*)&expected, desired, true, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST); }
-static inline bool xt_atomic_compare_exchange_weak_i64(xt_atomic_int64_t*  ptr, int64_t  expected, int64_t  desired) { return __atomic_compare_exchange_n((uint64_t*)ptr, (uint64_t*)&expected, desired, true, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST); }
+uint8_t xt_atomic_fetch_xor_u8(xt_atomic_uint8_t*, uint8_t);
+uint16_t xt_atomic_fetch_xor_u16(xt_atomic_uint16_t*ptr, uint16_t);
+uint32_t xt_atomic_fetch_xor_u32(xt_atomic_uint32_t*ptr, uint32_t);
+uint64_t xt_atomic_fetch_xor_u64(xt_atomic_uint64_t*ptr, uint64_t);
+int8_t xt_atomic_fetch_xor_i8(xt_atomic_int8_t*ptr, int8_t);
+int16_t xt_atomic_fetch_xor_i16(xt_atomic_int16_t*ptr, int16_t);
+int32_t xt_atomic_fetch_xor_i32(xt_atomic_int32_t*ptr, int32_t);
+int64_t xt_atomic_fetch_xor_i64(xt_atomic_int64_t*ptr, int64_t);
 
-static inline bool xt_atomic_compare_exchange_strong_u8 (xt_atomic_uint8_t*  ptr, uint8_t  expected, uint8_t  desired) { return __atomic_compare_exchange_n(           ptr,            &expected, desired, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST); }
-static inline bool xt_atomic_compare_exchange_strong_u16(xt_atomic_uint16_t* ptr, uint16_t expected, uint16_t desired) { return __atomic_compare_exchange_n(           ptr,            &expected, desired, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST); }
-static inline bool xt_atomic_compare_exchange_strong_u32(xt_atomic_uint32_t* ptr, uint32_t expected, uint32_t desired) { return __atomic_compare_exchange_n(           ptr,            &expected, desired, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST); }
-static inline bool xt_atomic_compare_exchange_strong_u64(xt_atomic_uint64_t* ptr, uint64_t expected, uint64_t desired) { return __atomic_compare_exchange_n(           ptr,            &expected, desired, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST); }
-static inline bool xt_atomic_compare_exchange_strong_i8 (xt_atomic_int8_t*   ptr, int8_t   expected, int8_t   desired) { return __atomic_compare_exchange_n((uint8_t*) ptr, (uint8_t*) &expected, desired, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST); }
-static inline bool xt_atomic_compare_exchange_strong_i16(xt_atomic_int16_t*  ptr, int16_t  expected, int16_t  desired) { return __atomic_compare_exchange_n((uint16_t*)ptr, (uint16_t*)&expected, desired, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST); }
-static inline bool xt_atomic_compare_exchange_strong_i32(xt_atomic_int32_t*  ptr, int32_t  expected, int32_t  desired) { return __atomic_compare_exchange_n((uint32_t*)ptr, (uint32_t*)&expected, desired, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST); }
-static inline bool xt_atomic_compare_exchange_strong_i64(xt_atomic_int64_t*  ptr, int64_t  expected, int64_t  desired) { return __atomic_compare_exchange_n((uint64_t*)ptr, (uint64_t*)&expected, desired, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST); }
+uint8_t  xt_atomic_compare_exchange_u8 (xt_atomic_uint8_t*  ptr, uint8_t  expected, uint8_t  desired);
+uint16_t xt_atomic_compare_exchange_u16(xt_atomic_uint16_t* ptr, uint16_t expected, uint16_t desired);
+uint32_t xt_atomic_compare_exchange_u32(xt_atomic_uint32_t* ptr, uint32_t expected, uint32_t desired);
+uint64_t xt_atomic_compare_exchange_u64(xt_atomic_uint64_t* ptr, uint64_t expected, uint64_t desired);
+int8_t   xt_atomic_compare_exchange_i8 (xt_atomic_int8_t*   ptr, int8_t   expected, int8_t   desired);
+int16_t  xt_atomic_compare_exchange_i16(xt_atomic_int16_t*  ptr, int16_t  expected, int16_t  desired);
+int32_t  xt_atomic_compare_exchange_i32(xt_atomic_int32_t*  ptr, int32_t  expected, int32_t  desired);
+int64_t  xt_atomic_compare_exchange_i64(xt_atomic_int64_t*  ptr, int64_t  expected, int64_t  desired);
 
-static inline void* xt_atomic_load_ptr(const xt_atomic_ptr_t* ptr) { return (void*)__atomic_load_n((uint64_t*)ptr, __ATOMIC_SEQ_CST); }
-static inline void  xt_atomic_store_ptr(xt_atomic_ptr_t* ptr, void* v) { __atomic_store_n((uint64_t*)ptr, (uint64_t)v, __ATOMIC_SEQ_CST); }
-static inline void* xt_atomic_exchange_ptr(xt_atomic_ptr_t* ptr, void* v) { return (void*)__atomic_exchange_n((uint64_t*)ptr, (uint64_t)v, __ATOMIC_SEQ_CST); }
-static inline bool  xt_atomic_compare_exchange_strong_ptr(xt_atomic_ptr_t* ptr, void* expected, void* desired) { return        __atomic_compare_exchange_n((uint64_t*)ptr, (uint64_t*)&expected, (uint64_t)desired, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST); }
-static inline bool  xt_atomic_ompare_exchange_weak_ptr   (xt_atomic_ptr_t* ptr, void* expected, void* desired) { return        __atomic_compare_exchange_n((uint64_t*)ptr, (uint64_t*)&expected, (uint64_t)desired, true,  __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST); }
+static inline void* xt_atomic_load_ptr(const xt_atomic_ptr_t* ptr) { return (void*)xt_atomic_load_u64((uint64_t*)ptr); }
+static inline void  xt_atomic_store_ptr(xt_atomic_ptr_t* ptr, void* v) { xt_atomic_store_u64((uint64_t*)ptr, (uint64_t)v); }
+static inline void* xt_atomic_exchange_ptr(xt_atomic_ptr_t* ptr, void* v) { return (void*)xt_atomic_exchange_u64((uint64_t*)ptr, (uint64_t)v); }
+static inline bool  xt_atomic_compare_exchange_strong_ptr(xt_atomic_ptr_t* ptr, void* expected, void* desired) { return xt_atomic_compare_exchange_u64((xt_atomic_uint64_t*)ptr, (uint64_t)expected, (uint64_t)desired); }
 
 union xt_uif {unsigned u; int i; float f;};
 
@@ -221,8 +211,8 @@ int   xthread_queue_count(xt_queue_t* queue);
 // Progressive backoff spinlock based on Timur Doumler's ADC 2020 talk
 // https://www.youtube.com/watch?v=zrWYJ6FdOFQ
 void xt_spinlock_lock(xt_spinlock_t* ptr);
-#define xt_spinlock_trylock(ptr) __atomic_exchange_n((ptr), 1, __ATOMIC_ACQUIRE)
-#define xt_spinlock_unlock( ptr) __atomic_store_n   ((ptr), 0, __ATOMIC_RELEASE)
+bool xt_spinlock_trylock(xt_spinlock_t* ptr);
+void xt_spinlock_unlock(xt_spinlock_t* ptr);
 
 union xt_mutex_t
 {
@@ -268,7 +258,7 @@ struct xt_queue_t
 #ifdef XHL_THREAD_IMPL
 #undef XHL_THREAD_IMPL
 
-#if __SSE2__
+#if __SSE2__ || __AVX__
 // Used for _mm_pause()
 // https://www.intel.com/content/www/us/en/docs/cpp-compiler/developer-guide-reference/2021-10/pause-intrinsic.html
 #include <emmintrin.h>
@@ -281,7 +271,7 @@ struct xt_queue_t
 #endif
 
 #include <assert.h>
-#define THREAD_ASSERT(expression, message) assert((expression) && (message))
+#define XTHREAD_ASSERT(expression, message) assert((expression) && (message))
 
 #if defined(_WIN32)
 
@@ -408,6 +398,180 @@ void* xthread_tls_get(xt_tls_t tls)              { return pthread_getspecific((p
 
 #else
 #error Unknown platform.
+#endif
+
+#if defined(_MSC_VER) && !(__clang__)
+
+uint8_t  xt_atomic_load_u8 (const xt_atomic_uint8_t*  ptr) { return _InterlockedCompareExchange8 ((xt_atomic_int8_t*)ptr, 0, 0); }
+uint16_t xt_atomic_load_u16(const xt_atomic_uint16_t* ptr) { return _InterlockedCompareExchange16((xt_atomic_int16_t*)ptr, 0, 0); }
+uint32_t xt_atomic_load_u32(const xt_atomic_uint32_t* ptr) { return _InterlockedCompareExchange((xt_atomic_int32_t*)ptr, 0, 0); }
+uint64_t xt_atomic_load_u64(const xt_atomic_uint64_t* ptr) { return _InterlockedCompareExchange64(ptr, 0, 0); }
+int8_t   xt_atomic_load_i8 (const xt_atomic_int8_t*   ptr) { return _InterlockedCompareExchange8 (ptr, 0, 0); }
+int16_t  xt_atomic_load_i16(const xt_atomic_int16_t*  ptr) { return _InterlockedCompareExchange16(ptr, 0, 0); }
+int32_t  xt_atomic_load_i32(const xt_atomic_int32_t*  ptr) { return _InterlockedCompareExchange(ptr, 0, 0); }
+int64_t  xt_atomic_load_i64(const xt_atomic_int64_t*  ptr) { return _InterlockedCompareExchange64(ptr, 0, 0); }
+
+void xt_atomic_store_u8 (xt_atomic_uint8_t*  ptr, uint8_t  v) { _InterlockedExchange8(ptr, v); }
+void xt_atomic_store_u16(xt_atomic_uint16_t* ptr, uint16_t v) { _InterlockedExchange16(ptr, v); }
+void xt_atomic_store_u32(xt_atomic_uint32_t* ptr, uint32_t v) { _InterlockedExchange(ptr, v); }
+void xt_atomic_store_u64(xt_atomic_uint64_t* ptr, uint64_t v) { _InterlockedExchange64(ptr, v); }
+void xt_atomic_store_i8 (xt_atomic_int8_t*   ptr, int8_t   v) { _InterlockedExchange8(ptr, v); }
+void xt_atomic_store_i16(xt_atomic_int16_t*  ptr, int16_t  v) { _InterlockedExchange16(ptr, v); }
+void xt_atomic_store_i32(xt_atomic_int32_t*  ptr, int32_t  v) { _InterlockedExchange(ptr, v); }
+void xt_atomic_store_i64(xt_atomic_int64_t*  ptr, int64_t  v) { _InterlockedExchange64(ptr, v); }
+
+uint8_t  xt_atomic_exchange_u8 (xt_atomic_uint8_t*  ptr, uint8_t  v) { return _InterlockedExchange8(ptr, v); }
+uint16_t xt_atomic_exchange_u16(xt_atomic_uint16_t* ptr, uint16_t v) { return _InterlockedExchange16(ptr, v); }
+uint32_t xt_atomic_exchange_u32(xt_atomic_uint32_t* ptr, uint32_t v) { return _InterlockedExchange(ptr, v); }
+uint64_t xt_atomic_exchange_u64(xt_atomic_uint64_t* ptr, uint64_t v) { return _InterlockedExchange64(ptr, v); }
+int8_t   xt_atomic_exchange_i8 (xt_atomic_int8_t*   ptr, int8_t   v) { return _InterlockedExchange8(ptr, v); }
+int16_t  xt_atomic_exchange_i16(xt_atomic_int16_t*  ptr, int16_t  v) { return _InterlockedExchange16(ptr, v); }
+int32_t  xt_atomic_exchange_i32(xt_atomic_int32_t*  ptr, int32_t  v) { return _InterlockedExchange(ptr, v); }
+int64_t  xt_atomic_exchange_i64(xt_atomic_int64_t*  ptr, int64_t  v) { return _InterlockedExchange64(ptr, v); }
+
+uint8_t  xt_atomic_fetch_add_u8 (xt_atomic_uint8_t*  ptr, uint8_t  v) { return _InterlockedExchangeAdd8(ptr, v); }
+uint16_t xt_atomic_fetch_add_u16(xt_atomic_uint16_t* ptr, uint16_t v) { return _InterlockedExchangeAdd16(ptr, v); }
+uint32_t xt_atomic_fetch_add_u32(xt_atomic_uint32_t* ptr, uint32_t v) { return _InterlockedExchangeAdd(ptr, v); }
+uint64_t xt_atomic_fetch_add_u64(xt_atomic_uint64_t* ptr, uint64_t v) { return _InterlockedExchangeAdd64(ptr, v); }
+int8_t   xt_atomic_fetch_add_i8 (xt_atomic_int8_t*   ptr, int8_t   v) { return _InterlockedExchangeAdd8(ptr, v); }
+int16_t  xt_atomic_fetch_add_i16(xt_atomic_int16_t*  ptr, int16_t  v) { return _InterlockedExchangeAdd16(ptr, v); }
+int32_t  xt_atomic_fetch_add_i32(xt_atomic_int32_t*  ptr, int32_t  v) { return _InterlockedExchangeAdd(ptr, v); }
+int64_t  xt_atomic_fetch_add_i64(xt_atomic_int64_t*  ptr, int64_t  v) { return _InterlockedExchangeAdd64(ptr, v); }
+
+uint8_t  xt_atomic_fetch_sub_u8 (xt_atomic_uint8_t*  ptr, uint8_t  v) { return xt_atomic_fetch_add_u8 (ptr, -v); }
+uint16_t xt_atomic_fetch_sub_u16(xt_atomic_uint16_t* ptr, uint16_t v) { return xt_atomic_fetch_add_u16(ptr, -v); }
+uint32_t xt_atomic_fetch_sub_u32(xt_atomic_uint32_t* ptr, uint32_t v) { return xt_atomic_fetch_add_u32(ptr, -v); }
+uint64_t xt_atomic_fetch_sub_u64(xt_atomic_uint64_t* ptr, uint64_t v) { return xt_atomic_fetch_add_u64(ptr, -v); }
+int8_t   xt_atomic_fetch_sub_i8 (xt_atomic_int8_t*   ptr, int8_t   v) { return xt_atomic_fetch_add_i8 (ptr, -v); }
+int16_t  xt_atomic_fetch_sub_i16(xt_atomic_int16_t*  ptr, int16_t  v) { return xt_atomic_fetch_add_i16(ptr, -v); }
+int32_t  xt_atomic_fetch_sub_i32(xt_atomic_int32_t*  ptr, int32_t  v) { return xt_atomic_fetch_add_i32(ptr, -v); }
+int64_t  xt_atomic_fetch_sub_i64(xt_atomic_int64_t*  ptr, int64_t  v) { return xt_atomic_fetch_add_i64(ptr, -v); }
+
+uint8_t  xt_atomic_fetch_and_u8 (xt_atomic_uint8_t*  ptr, uint8_t  v) { return _InterlockedAnd8(ptr, v); }
+uint16_t xt_atomic_fetch_and_u16(xt_atomic_uint16_t* ptr, uint16_t v) { return _InterlockedAnd16(ptr, v); }
+uint32_t xt_atomic_fetch_and_u32(xt_atomic_uint32_t* ptr, uint32_t v) { return _InterlockedAnd(ptr, v); }
+uint64_t xt_atomic_fetch_and_u64(xt_atomic_uint64_t* ptr, uint64_t v) { return _InterlockedAnd64(ptr, v); }
+int8_t   xt_atomic_fetch_and_i8 (xt_atomic_int8_t*   ptr, int8_t   v) { return _InterlockedAnd8(ptr, v); }
+int16_t  xt_atomic_fetch_and_i16(xt_atomic_int16_t*  ptr, int16_t  v) { return _InterlockedAnd16(ptr, v); }
+int32_t  xt_atomic_fetch_and_i32(xt_atomic_int32_t*  ptr, int32_t  v) { return _InterlockedAnd(ptr, v); }
+int64_t  xt_atomic_fetch_and_i64(xt_atomic_int64_t*  ptr, int64_t  v) { return _InterlockedAnd64(ptr, v); }
+
+uint8_t  xt_atomic_fetch_or_u8 (xt_atomic_uint8_t* ptr, uint8_t  v) { return _InterlockedOr8(ptr, v); }
+uint16_t xt_atomic_fetch_or_u16(xt_atomic_uint16_t*ptr, uint16_t v) { return _InterlockedOr16(ptr, v); }
+uint32_t xt_atomic_fetch_or_u32(xt_atomic_uint32_t*ptr, uint32_t v) { return _InterlockedOr(ptr, v); }
+uint64_t xt_atomic_fetch_or_u64(xt_atomic_uint64_t*ptr, uint64_t v) { return _InterlockedOr64(ptr, v); }
+int8_t   xt_atomic_fetch_or_i8 (xt_atomic_int8_t*ptr,   int8_t   v) { return _InterlockedOr8(ptr, v); }
+int16_t  xt_atomic_fetch_or_i16(xt_atomic_int16_t*ptr,  int16_t  v) { return _InterlockedOr16(ptr, v); }
+int32_t  xt_atomic_fetch_or_i32(xt_atomic_int32_t*ptr,  int32_t  v) { return _InterlockedOr(ptr, v); }
+int64_t  xt_atomic_fetch_or_i64(xt_atomic_int64_t*ptr,  int64_t  v) { return _InterlockedOr64(ptr, v); }
+
+uint8_t  xt_atomic_fetch_xor_u8 (xt_atomic_uint8_t*  ptr, uint8_t  v) { return _InterlockedXor8(ptr, v); }
+uint16_t xt_atomic_fetch_xor_u16(xt_atomic_uint16_t* ptr, uint16_t v) { return _InterlockedXor16(ptr, v); }
+uint32_t xt_atomic_fetch_xor_u32(xt_atomic_uint32_t* ptr, uint32_t v) { return _InterlockedXor(ptr, v); }
+uint64_t xt_atomic_fetch_xor_u64(xt_atomic_uint64_t* ptr, uint64_t v) { return _InterlockedXor64(ptr, v); }
+int8_t   xt_atomic_fetch_xor_i8 (xt_atomic_int8_t*   ptr, int8_t   v) { return _InterlockedXor8(ptr, v); }
+int16_t  xt_atomic_fetch_xor_i16(xt_atomic_int16_t*  ptr, int16_t  v) { return _InterlockedXor16(ptr, v); }
+int32_t  xt_atomic_fetch_xor_i32(xt_atomic_int32_t*  ptr, int32_t  v) { return _InterlockedXor(ptr, v); }
+int64_t  xt_atomic_fetch_xor_i64(xt_atomic_int64_t*  ptr, int64_t  v) { return _InterlockedXor64(ptr, v); }
+
+uint8_t  xt_atomic_compare_exchange_u8 (xt_atomic_uint8_t*  ptr, uint8_t  expected, uint8_t  desired) { return _InterlockedCompareExchange8 (ptr, desired, expected); }
+uint16_t xt_atomic_compare_exchange_u16(xt_atomic_uint16_t* ptr, uint16_t expected, uint16_t desired) { return _InterlockedCompareExchange16(ptr, desired, expected); }
+uint32_t xt_atomic_compare_exchange_u32(xt_atomic_uint32_t* ptr, uint32_t expected, uint32_t desired) { return _InterlockedCompareExchange  (ptr, desired, expected); }
+uint64_t xt_atomic_compare_exchange_u64(xt_atomic_uint64_t* ptr, uint64_t expected, uint64_t desired) { return _InterlockedCompareExchange64(ptr, desired, expected); }
+int8_t   xt_atomic_compare_exchange_i8 (xt_atomic_int8_t*   ptr, int8_t   expected, int8_t   desired) { return _InterlockedCompareExchange8 (ptr, desired, expected); }
+int16_t  xt_atomic_compare_exchange_i16(xt_atomic_int16_t*  ptr, int16_t  expected, int16_t  desired) { return _InterlockedCompareExchange16(ptr, desired, expected); }
+int32_t  xt_atomic_compare_exchange_i32(xt_atomic_int32_t*  ptr, int32_t  expected, int32_t  desired) { return _InterlockedCompareExchange  (ptr, desired, expected); }
+int64_t  xt_atomic_compare_exchange_i64(xt_atomic_int64_t*  ptr, int64_t  expected, int64_t  desired) { return _InterlockedCompareExchange64(ptr, desired, expected); }
+
+bool xt_spinlock_trylock(xt_spinlock_t*  ptr) { return _InterlockedCompareExchange8(ptr, 1, 0); }
+void xt_spinlock_unlock( xt_spinlock_t*  ptr) { return _InterlockedExchange8(ptr, 0); }
+
+#else
+
+uint8_t  xt_atomic_load_u8 (const xt_atomic_uint8_t*  ptr) { return __atomic_load_n(ptr, __ATOMIC_SEQ_CST); }
+uint16_t xt_atomic_load_u16(const xt_atomic_uint16_t* ptr) { return __atomic_load_n(ptr, __ATOMIC_SEQ_CST); }
+uint32_t xt_atomic_load_u32(const xt_atomic_uint32_t* ptr) { return __atomic_load_n(ptr, __ATOMIC_SEQ_CST); }
+uint64_t xt_atomic_load_u64(const xt_atomic_uint64_t* ptr) { return __atomic_load_n(ptr, __ATOMIC_SEQ_CST); }
+int8_t   xt_atomic_load_i8 (const xt_atomic_int8_t*   ptr) { return __atomic_load_n(ptr, __ATOMIC_SEQ_CST); }
+int16_t  xt_atomic_load_i16(const xt_atomic_int16_t*  ptr) { return __atomic_load_n(ptr, __ATOMIC_SEQ_CST); }
+int32_t  xt_atomic_load_i32(const xt_atomic_int32_t*  ptr) { return __atomic_load_n(ptr, __ATOMIC_SEQ_CST); }
+int64_t  xt_atomic_load_i64(const xt_atomic_int64_t*  ptr) { return __atomic_load_n(ptr, __ATOMIC_SEQ_CST); }
+
+void xt_atomic_store_u8 (xt_atomic_uint8_t*  ptr, uint8_t  v) { __atomic_store_n(ptr, v, __ATOMIC_SEQ_CST); }
+void xt_atomic_store_u16(xt_atomic_uint16_t* ptr, uint16_t v) { __atomic_store_n(ptr, v, __ATOMIC_SEQ_CST); }
+void xt_atomic_store_u32(xt_atomic_uint32_t* ptr, uint32_t v) { __atomic_store_n(ptr, v, __ATOMIC_SEQ_CST); }
+void xt_atomic_store_u64(xt_atomic_uint64_t* ptr, uint64_t v) { __atomic_store_n(ptr, v, __ATOMIC_SEQ_CST); }
+void xt_atomic_store_i8 (xt_atomic_int8_t*   ptr, int8_t   v) { __atomic_store_n(ptr, v, __ATOMIC_SEQ_CST); }
+void xt_atomic_store_i16(xt_atomic_int16_t*  ptr, int16_t  v) { __atomic_store_n(ptr, v, __ATOMIC_SEQ_CST); }
+void xt_atomic_store_i32(xt_atomic_int32_t*  ptr, int32_t  v) { __atomic_store_n(ptr, v, __ATOMIC_SEQ_CST); }
+void xt_atomic_store_i64(xt_atomic_int64_t*  ptr, int64_t  v) { __atomic_store_n(ptr, v, __ATOMIC_SEQ_CST); }
+
+uint8_t  xt_atomic_exchange_u8 (xt_atomic_uint8_t*  ptr, uint8_t  v) { return __atomic_exchange_n(ptr, v, __ATOMIC_SEQ_CST); }
+uint16_t xt_atomic_exchange_u16(xt_atomic_uint16_t* ptr, uint16_t v) { return __atomic_exchange_n(ptr, v, __ATOMIC_SEQ_CST); }
+uint32_t xt_atomic_exchange_u32(xt_atomic_uint32_t* ptr, uint32_t v) { return __atomic_exchange_n(ptr, v, __ATOMIC_SEQ_CST); }
+uint64_t xt_atomic_exchange_u64(xt_atomic_uint64_t* ptr, uint64_t v) { return __atomic_exchange_n(ptr, v, __ATOMIC_SEQ_CST); }
+int8_t   xt_atomic_exchange_i8 (xt_atomic_int8_t*   ptr, int8_t   v) { return __atomic_exchange_n(ptr, v, __ATOMIC_SEQ_CST); }
+int16_t  xt_atomic_exchange_i16(xt_atomic_int16_t*  ptr, int16_t  v) { return __atomic_exchange_n(ptr, v, __ATOMIC_SEQ_CST); }
+int32_t  xt_atomic_exchange_i32(xt_atomic_int32_t*  ptr, int32_t  v) { return __atomic_exchange_n(ptr, v, __ATOMIC_SEQ_CST); }
+int64_t  xt_atomic_exchange_i64(xt_atomic_int64_t*  ptr, int64_t  v) { return __atomic_exchange_n(ptr, v, __ATOMIC_SEQ_CST); }
+
+uint8_t  xt_atomic_fetch_add_u8 (xt_atomic_uint8_t*  ptr, uint8_t  v) { return __atomic_fetch_add(ptr, v, __ATOMIC_SEQ_CST); }
+uint16_t xt_atomic_fetch_add_u16(xt_atomic_uint16_t* ptr, uint16_t v) { return __atomic_fetch_add(ptr, v, __ATOMIC_SEQ_CST); }
+uint32_t xt_atomic_fetch_add_u32(xt_atomic_uint32_t* ptr, uint32_t v) { return __atomic_fetch_add(ptr, v, __ATOMIC_SEQ_CST); }
+uint64_t xt_atomic_fetch_add_u64(xt_atomic_uint64_t* ptr, uint64_t v) { return __atomic_fetch_add(ptr, v, __ATOMIC_SEQ_CST); }
+int8_t   xt_atomic_fetch_add_i8 (xt_atomic_int8_t*   ptr, int8_t   v) { return __atomic_fetch_add(ptr, v, __ATOMIC_SEQ_CST); }
+int16_t  xt_atomic_fetch_add_i16(xt_atomic_int16_t*  ptr, int16_t  v) { return __atomic_fetch_add(ptr, v, __ATOMIC_SEQ_CST); }
+int32_t  xt_atomic_fetch_add_i32(xt_atomic_int32_t*  ptr, int32_t  v) { return __atomic_fetch_add(ptr, v, __ATOMIC_SEQ_CST); }
+int64_t  xt_atomic_fetch_add_i64(xt_atomic_int64_t*  ptr, int64_t  v) { return __atomic_fetch_add(ptr, v, __ATOMIC_SEQ_CST); }
+
+uint8_t  xt_atomic_fetch_sub_u8 (xt_atomic_uint8_t*  ptr, uint8_t  v) { return __atomic_fetch_sub(ptr, v, __ATOMIC_SEQ_CST); }
+uint16_t xt_atomic_fetch_sub_u16(xt_atomic_uint16_t* ptr, uint16_t v) { return __atomic_fetch_sub(ptr, v, __ATOMIC_SEQ_CST); }
+uint32_t xt_atomic_fetch_sub_u32(xt_atomic_uint32_t* ptr, uint32_t v) { return __atomic_fetch_sub(ptr, v, __ATOMIC_SEQ_CST); }
+uint64_t xt_atomic_fetch_sub_u64(xt_atomic_uint64_t* ptr, uint64_t v) { return __atomic_fetch_sub(ptr, v, __ATOMIC_SEQ_CST); }
+int8_t   xt_atomic_fetch_sub_i8 (xt_atomic_int8_t*   ptr, int8_t   v) { return __atomic_fetch_sub(ptr, v, __ATOMIC_SEQ_CST); }
+int16_t  xt_atomic_fetch_sub_i16(xt_atomic_int16_t*  ptr, int16_t  v) { return __atomic_fetch_sub(ptr, v, __ATOMIC_SEQ_CST); }
+int32_t  xt_atomic_fetch_sub_i32(xt_atomic_int32_t*  ptr, int32_t  v) { return __atomic_fetch_sub(ptr, v, __ATOMIC_SEQ_CST); }
+int64_t  xt_atomic_fetch_sub_i64(xt_atomic_int64_t*  ptr, int64_t  v) { return __atomic_fetch_sub(ptr, v, __ATOMIC_SEQ_CST); }
+
+uint8_t  xt_atomic_fetch_and_u8 (xt_atomic_uint8_t*  ptr, uint8_t  v) { return __atomic_fetch_and(ptr, v, __ATOMIC_SEQ_CST); }
+uint16_t xt_atomic_fetch_and_u16(xt_atomic_uint16_t* ptr, uint16_t v) { return __atomic_fetch_and(ptr, v, __ATOMIC_SEQ_CST); }
+uint32_t xt_atomic_fetch_and_u32(xt_atomic_uint32_t* ptr, uint32_t v) { return __atomic_fetch_and(ptr, v, __ATOMIC_SEQ_CST); }
+uint64_t xt_atomic_fetch_and_u64(xt_atomic_uint64_t* ptr, uint64_t v) { return __atomic_fetch_and(ptr, v, __ATOMIC_SEQ_CST); }
+int8_t   xt_atomic_fetch_and_i8 (xt_atomic_int8_t*   ptr, int8_t   v) { return __atomic_fetch_and(ptr, v, __ATOMIC_SEQ_CST); }
+int16_t  xt_atomic_fetch_and_i16(xt_atomic_int16_t*  ptr, int16_t  v) { return __atomic_fetch_and(ptr, v, __ATOMIC_SEQ_CST); }
+int32_t  xt_atomic_fetch_and_i32(xt_atomic_int32_t*  ptr, int32_t  v) { return __atomic_fetch_and(ptr, v, __ATOMIC_SEQ_CST); }
+int64_t  xt_atomic_fetch_and_i64(xt_atomic_int64_t*  ptr, int64_t  v) { return __atomic_fetch_and(ptr, v, __ATOMIC_SEQ_CST); }
+
+uint8_t  xt_atomic_fetch_or_u8 (xt_atomic_uint8_t* ptr, uint8_t  v) { return __atomic_fetch_or(ptr, v, __ATOMIC_SEQ_CST); }
+uint16_t xt_atomic_fetch_or_u16(xt_atomic_uint16_t*ptr, uint16_t v) { return __atomic_fetch_or(ptr, v, __ATOMIC_SEQ_CST); }
+uint32_t xt_atomic_fetch_or_u32(xt_atomic_uint32_t*ptr, uint32_t v) { return __atomic_fetch_or(ptr, v, __ATOMIC_SEQ_CST); }
+uint64_t xt_atomic_fetch_or_u64(xt_atomic_uint64_t*ptr, uint64_t v) { return __atomic_fetch_or(ptr, v, __ATOMIC_SEQ_CST); }
+int8_t   xt_atomic_fetch_or_i8 (xt_atomic_int8_t*ptr,   int8_t   v) { return __atomic_fetch_or(ptr, v, __ATOMIC_SEQ_CST); }
+int16_t  xt_atomic_fetch_or_i16(xt_atomic_int16_t*ptr,  int16_t  v) { return __atomic_fetch_or(ptr, v, __ATOMIC_SEQ_CST); }
+int32_t  xt_atomic_fetch_or_i32(xt_atomic_int32_t*ptr,  int32_t  v) { return __atomic_fetch_or(ptr, v, __ATOMIC_SEQ_CST); }
+int64_t  xt_atomic_fetch_or_i64(xt_atomic_int64_t*ptr,  int64_t  v) { return __atomic_fetch_or(ptr, v, __ATOMIC_SEQ_CST); }
+
+uint8_t  xt_atomic_fetch_xor_u8 (xt_atomic_uint8_t*  ptr, uint8_t  v) { return __atomic_fetch_xor(ptr, v, __ATOMIC_SEQ_CST); }
+uint16_t xt_atomic_fetch_xor_u16(xt_atomic_uint16_t* ptr, uint16_t v) { return __atomic_fetch_xor(ptr, v, __ATOMIC_SEQ_CST); }
+uint32_t xt_atomic_fetch_xor_u32(xt_atomic_uint32_t* ptr, uint32_t v) { return __atomic_fetch_xor(ptr, v, __ATOMIC_SEQ_CST); }
+uint64_t xt_atomic_fetch_xor_u64(xt_atomic_uint64_t* ptr, uint64_t v) { return __atomic_fetch_xor(ptr, v, __ATOMIC_SEQ_CST); }
+int8_t   xt_atomic_fetch_xor_i8 (xt_atomic_int8_t*   ptr, int8_t   v) { return __atomic_fetch_xor(ptr, v, __ATOMIC_SEQ_CST); }
+int16_t  xt_atomic_fetch_xor_i16(xt_atomic_int16_t*  ptr, int16_t  v) { return __atomic_fetch_xor(ptr, v, __ATOMIC_SEQ_CST); }
+int32_t  xt_atomic_fetch_xor_i32(xt_atomic_int32_t*  ptr, int32_t  v) { return __atomic_fetch_xor(ptr, v, __ATOMIC_SEQ_CST); }
+int64_t  xt_atomic_fetch_xor_i64(xt_atomic_int64_t*  ptr, int64_t  v) { return __atomic_fetch_xor(ptr, v, __ATOMIC_SEQ_CST); }
+
+uint8_t  xt_atomic_compare_exchange_u8 (xt_atomic_uint8_t*  ptr, uint8_t  expected, uint8_t  desired) { return __sync_val_compare_and_swap(           ptr, expected, desired); }
+uint16_t xt_atomic_compare_exchange_u16(xt_atomic_uint16_t* ptr, uint16_t expected, uint16_t desired) { return __sync_val_compare_and_swap(           ptr, expected, desired); }
+uint32_t xt_atomic_compare_exchange_u32(xt_atomic_uint32_t* ptr, uint32_t expected, uint32_t desired) { return __sync_val_compare_and_swap(           ptr, expected, desired); }
+uint64_t xt_atomic_compare_exchange_u64(xt_atomic_uint64_t* ptr, uint64_t expected, uint64_t desired) { return __sync_val_compare_and_swap(           ptr, expected, desired); }
+int8_t   xt_atomic_compare_exchange_i8 (xt_atomic_int8_t*   ptr, int8_t   expected, int8_t   desired) { return __sync_val_compare_and_swap((uint8_t*) ptr, expected, desired); }
+int16_t  xt_atomic_compare_exchange_i16(xt_atomic_int16_t*  ptr, int16_t  expected, int16_t  desired) { return __sync_val_compare_and_swap((uint16_t*)ptr, expected, desired); }
+int32_t  xt_atomic_compare_exchange_i32(xt_atomic_int32_t*  ptr, int32_t  expected, int32_t  desired) { return __sync_val_compare_and_swap((uint32_t*)ptr, expected, desired); }
+int64_t  xt_atomic_compare_exchange_i64(xt_atomic_int64_t*  ptr, int64_t  expected, int64_t  desired) { return __sync_val_compare_and_swap((uint64_t*)ptr, expected, desired); }
+
+bool xt_spinlock_trylock(xt_spinlock_t* ptr) { return __atomic_exchange_n(ptr, 1, __ATOMIC_ACQUIRE); }
+void xt_spinlock_unlock(xt_spinlock_t* ptr)  { __atomic_store_n(ptr, 0, __ATOMIC_RELEASE); }
+
 #endif
 
 struct xthread_internal_signal_t
@@ -585,9 +749,9 @@ void xthread_queue_term(xt_queue_t* queue)
 int xthread_queue_produce(xt_queue_t* queue, void* value, int timeout_ms)
 {
 #ifndef NDEBUG
-    if (xt_atomic_compare_exchange_strong_i32(&queue->id_produce_is_set, 0, 1) == 0)
+    if (xt_atomic_compare_exchange_i32(&queue->id_produce_is_set, 0, 1) == 0)
         queue->id_produce = xthread_current();
-    THREAD_ASSERT(
+    XTHREAD_ASSERT(
         xthread_current() == queue->id_produce,
         "thread_queue_produce called from multiple threads");
 #endif
@@ -611,9 +775,9 @@ int xthread_queue_produce(xt_queue_t* queue, void* value, int timeout_ms)
 void* xthread_queue_consume(xt_queue_t* queue, int timeout_ms)
 {
 #ifndef NDEBUG
-    if (xt_atomic_compare_exchange_strong_i32(&queue->id_consume_is_set, 0, 1) == 0)
+    if (xt_atomic_compare_exchange_i32(&queue->id_consume_is_set, 0, 1) == 0)
         queue->id_consume = xthread_current();
-    THREAD_ASSERT(
+    XTHREAD_ASSERT(
         xthread_current() == queue->id_consume,
         "thread_queue_consume called from multiple threads");
 #endif

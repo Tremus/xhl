@@ -445,13 +445,13 @@ uint32_t xm_clzu(uint32_t x)
 uint64_t xm_ctzull(uint64_t mask)
 {
     unsigned long index;
-    return _BitScanForward64(&index, mask) ? index;
+    return _BitScanForward64(&index, mask) ? index : 64;
 }
 
 uint32_t xm_ctzu(uint32_t mask)
 {
     unsigned long index;
-    return _BitScanForward(&index, mask) ? index;
+    return _BitScanForward(&index, mask) ? index : 32;
 }
 
 uint64_t xm_clzull(uint64_t mask)

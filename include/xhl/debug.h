@@ -23,6 +23,12 @@
     while (0)
 #endif
 
+#if defined(_MSC_VER) && ! defined(__clang__)
+#define xstatic_assert(cond, msg) static_assert(cond, msg)
+#else
+#define xstatic_assert(cond, msg) _Static_assert(cond, msg)
+#endif
+
 #ifdef __cplusplus
 #define XHL_DEBUG_RESTRICT
 extern "C" {

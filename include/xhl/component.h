@@ -15,7 +15,7 @@ extern "C" {
 #include <stddef.h>
 #include <stdint.h>
 
-enum xcomp_event : uint32_t
+enum xcomp_event
 {
     XCOMP_EVENT_PAINT,
     // geometry
@@ -55,7 +55,7 @@ enum xcomp_event : uint32_t
     XCOMP_EVENT_KEYBOARD_FOCUS_CHANGED,
 };
 
-enum xcomp_flag : uint64_t
+enum xcomp_flag
 {
     XCOMP_FLAG_IS_DISABLED          = 1 << 0,
     XCOMP_FLAG_IS_HIDDEN            = 1 << 1,
@@ -71,7 +71,7 @@ enum xcomp_flag : uint64_t
     XCOMP_FLAG_HAS_KEYBOARD_FOCUS   = 1 << 9,
 };
 
-enum xcomp_modifier : uint64_t
+enum xcomp_modifier
 {
     XCOMP_MOD_LEFT_BUTTON   = 1 << 0,
     XCOMP_MOD_RIGHT_BUTTON  = 1 << 1,
