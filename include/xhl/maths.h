@@ -3,6 +3,15 @@
 // Contains some functions from licensed libraries. See bottom of file
 #include <stdint.h>
 
+#define XM_Ef 2.718281828459045f
+#define XM_TAUf 6.283185307179586f
+#define XM_PIf 3.141592653589793f
+#define XM_HALF_PIf 1.5707963267948966f
+#define XM_LN2f 0.6931471805599453f
+#define XM_1_LN2f 1.4426950408889634f
+#define XM_LN10f 2.302585092994046f
+#define XM_1_LN10f 0.43429448190325176f
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -45,15 +54,35 @@ double xm_normd(double v, double start, double end);
 int xm_droundi(double v);
 int xm_dfloori(double v);
 
+/*i*i*i*i*i*
+ i Complex i
+ *i*i*i*i*i*/
 // clang-format off
 union xm_complexf
 {
     struct { float real, imag; };
     struct { float re, im; };
 };
+typedef union xm_complexf xm_complexf;
 // clang-format on
-union xm_complexf xm_cmulf(float a_re, float a_im, float b_re, float b_im);
-union xm_complexf xm_cdivf(float a_re, float a_im, float b_re, float b_im);
+xm_complexf xm_caddf(float a_re, float a_im, float b_re, float b_im);
+xm_complexf xm_csubf(float a_re, float a_im, float b_re, float b_im);
+xm_complexf xm_cmulf(float a_re, float a_im, float b_re, float b_im);
+xm_complexf xm_cdivf(float a_re, float a_im, float b_re, float b_im);
+
+xm_complexf xm_csqrtf(float re, float im);
+xm_complexf xm_cexpf(float re, float im);
+xm_complexf xm_clogf(float re, float im);
+xm_complexf xm_clog2f(float re, float im);
+xm_complexf xm_clog10f(float re, float im);
+xm_complexf xm_cpowf(float a_re, float a_im, float b_re, float b_im);
+
+xm_complexf xm_csinf(float re, float im);
+xm_complexf xm_ccosf(float re, float im);
+xm_complexf xm_ctanf(float re, float im);
+xm_complexf xm_csinhf(float re, float im);
+xm_complexf xm_ccoshf(float re, float im);
+xm_complexf xm_ctanhf(float re, float im);
 
 /*%*%*%*%*%*%*%*
  % Scientific  %
@@ -64,18 +93,32 @@ union xm_complexf xm_cdivf(float a_re, float a_im, float b_re, float b_im);
 
 float xm_fastersin(float x);
 float xm_fastersinfull(float x);
+float xm_fastercos(float x);
+float xm_fastercosfull(float x);
+float xm_fastertan(float x);
 
-// This function accepts normalised halfpi values
-float xm_fasttan(float x);
+// Accepts input of πx/2
+float xm_fasttan_normalised(float x);
+
+float xm_fastsinh(float x);
+float xm_fastcosh(float x);
+float xm_fasttanh(float x);
+float xm_fastcoth(float x);
+float xm_fastsech(float x);
+float xm_fastcsch(float x);
 
 float xm_fastatan(float x);
 float xm_fastatan2(float x, float y);
 
+float xm_fastlog(float a);
+// ~6x faster than log2f
+float xm_fastlog2(float a);
+// ~6.6x faster than log10f
+float xm_fastlog10(float x);
+
 float xm_fasterlog(float a);
 // ~12x faster than log10f. Lacks much precision
 float xm_fasterlog10(float a);
-// ~6.6x faster than log10f
-float xm_fastlog10(float x);
 // Inputs less than -87 will break
 float xm_fastexp(float x);
 float xm_fasterexp(float x);
@@ -131,16 +174,13 @@ uint64_t xm_xorshift64(uint32_t x);
 #undef XHL_MATHS_IMPL
 #include <math.h>
 
-#define XM_TAUf 6.283185307179586f
-#define XM_PIf 3.141592653589793f
-#define XM_HALF_PIf 1.5707963267948966f
-
 union xm_fi32
 {
     float    f;
     int32_t  i32;
     uint32_t u32;
 };
+typedef union xm_fi32 xm_fi32;
 
 int      xm_mini(int a, int b) { return a > b ? b : a; }
 unsigned xm_minu(unsigned a, unsigned b) { return a > b ? b : a; }
@@ -201,23 +241,132 @@ int xm_dfloori(double d)
     return c.i[0];
 }
 
-union xm_complexf xm_cmulf(float a_re, float a_im, float b_re, float b_im)
+xm_complexf xm_caddf(float a_re, float a_im, float b_re, float b_im)
 {
-    union xm_complexf c;
+    xm_complexf c;
+    c.re = a_re + b_re;
+    c.im = a_im + b_im;
+    return c;
+}
+
+xm_complexf xm_csubf(float a_re, float a_im, float b_re, float b_im)
+{
+    xm_complexf c;
+    c.re = a_re - b_re;
+    c.im = a_im - b_im;
+    return c;
+}
+
+xm_complexf xm_cmulf(float a_re, float a_im, float b_re, float b_im)
+{
+    xm_complexf c;
     c.real = a_re * b_re - a_im * b_im;
     c.imag = a_re * b_im + a_im * b_re;
     return c;
 }
 
-union xm_complexf xm_cdivf(float a_re, float a_im, float b_re, float b_im)
+xm_complexf xm_cdivf(float a_re, float a_im, float b_re, float b_im)
 {
-    union xm_complexf c;
+    xm_complexf c;
     c.real = (a_re * b_re + a_im * b_im) / (b_re * b_re + b_im * b_im);
     c.imag = (a_im * b_re - a_re * b_im) / (b_re * b_re + b_im * b_im);
     return c;
 }
 
-// Paul Minieros sin
+xm_complexf xm_csqrtf(float re, float im)
+{
+    xm_complexf c;
+
+    float mag = hypotf(re, im);
+    c.re      = sqrtf((mag + re) * 0.5f);
+    c.im      = sqrtf((mag - re) * 0.5f);
+    c.im      = copysignf(c.im, im);
+    return c;
+}
+xm_complexf xm_cexpf(float re, float im)
+{
+    xm_complexf c;
+
+    float re_exp = xm_fastexp(re);
+    c.re         = re_exp * xm_fastercos(im);
+    c.re         = re_exp * xm_fastersin(im);
+    return c;
+}
+xm_complexf xm_clogf(float re, float im)
+{
+    xm_complexf c;
+
+    float mag = hypotf(re, im);
+    c.re      = xm_fastlog(mag);
+    c.im      = xm_fastatan2(im, re);
+    return c;
+}
+xm_complexf xm_clog2f(float re, float im)
+{
+    xm_complexf c = xm_clogf(re, im);
+    return xm_cmulf(c.re, c.im, XM_1_LN2f, 0);
+}
+xm_complexf xm_clog10f(float re, float im)
+{
+    xm_complexf c = xm_clogf(re, im);
+    return xm_cmulf(c.re, c.im, XM_1_LN10f, 0);
+}
+xm_complexf xm_cpowf(float a_re, float a_im, float b_re, float b_im)
+{
+    xm_complexf c = xm_clogf(a_re, a_im);
+    c             = xm_cmulf(c.re, c.im, b_re, b_im);
+    return xm_cexpf(c.re, c.im);
+}
+
+// https://en.wikipedia.org/wiki/Trigonometric_functions#In_the_complex_plane
+xm_complexf xm_csinf(float re, float im)
+{
+    xm_complexf c;
+    c.re = xm_fastersinfull(re) * xm_fastcosh(im);
+    c.im = xm_fastercosfull(re) * xm_fastsinh(im);
+    return c;
+}
+
+xm_complexf xm_ccosf(float re, float im)
+{
+    xm_complexf c;
+    c.re = xm_fastercosfull(re) * xm_fastcosh(im);
+    c.im = -xm_fastersinfull(re) * xm_fastsinh(im);
+    return c;
+}
+
+xm_complexf xm_ctanf(float re, float im)
+{
+    xm_complexf n, d;
+    n = xm_csinf(re, im);
+    d = xm_ccosf(re, im);
+    return xm_cdivf(n.re, n.im, d.re, d.im);
+}
+
+xm_complexf xm_csinhf(float re, float im)
+{
+    xm_complexf c;
+    c.re = xm_fastercosfull(im) * xm_fastsinh(re);
+    c.im = xm_fastersinfull(im) * xm_fastcosh(re);
+    return c;
+}
+xm_complexf xm_ccoshf(float re, float im)
+{
+    xm_complexf c;
+    c.re = xm_fastercosfull(im) * xm_fastcosh(re);
+    c.im = xm_fastersinfull(im) * xm_fastsinh(re);
+    return c;
+}
+
+xm_complexf xm_ctanhf(float re, float im)
+{
+    xm_complexf n, d;
+    n = xm_csinhf(re, im);
+    d = xm_ccoshf(re, im);
+    return xm_cdivf(n.re, n.im, d.re, d.im);
+}
+
+// Paul Minieros fastersin
 float xm_fastersin(float x)
 {
     static const float fouroverpi   = 1.2732395447351627f;
@@ -243,6 +392,7 @@ float xm_fastersin(float x)
 
     return qpprox * (q + p.f * qpprox);
 }
+
 float xm_fastersinfull(float x)
 {
     int   k    = (int)(x * 0.15915494309189534f);
@@ -250,13 +400,31 @@ float xm_fastersinfull(float x)
     return xm_fastersin((half + k) * XM_TAUf - x);
 }
 
+// Paul Minieros cos
+float xm_fastercos(float x) { return xm_fastersin(x + ((x > XM_HALF_PIf) ? (XM_HALF_PIf - XM_TAUf) : XM_HALF_PIf)); }
+float xm_fastercosfull(float x) { return xm_fastersinfull(x + XM_HALF_PIf); }
+float xm_fastertan(float x) { return xm_fastersin(x) / xm_fastercos(x); }
+
 // https://observablehq.com/@jrus/fasttan
-float xm_fasttan(float x)
+float xm_fasttan_normalised(float x)
 {
     // 3 add, 3 mult, 1 div
     float y = 1.0f - x * x;
     return x * (-0.0187108f * y + 0.31583526f + 1.27365776f / y);
 }
+
+// https://en.wikipedia.org/wiki/Hyperbolic_functions#Definitions
+float xm_fastsinh(float x) { return (xm_fastexp(x) - xm_fastexp(-x)) * 0.5f; }
+float xm_fastcosh(float x) { return (xm_fastexp(x) + xm_fastexp(-x)) * 0.5f; }
+float xm_fasttanh(float x) { return (xm_fastexp(x) - xm_fastexp(-x)) / (xm_fastexp(x) + xm_fastexp(-x)); }
+float xm_fastcoth(float x)
+{
+    float a = xm_fastexp(x);
+    float b = xm_fastexp(-x);
+    return (a + b) / (a - b);
+}
+float xm_fastsech(float x) { return 2.0f / (xm_fastexp(x) + xm_fastexp(-x)); }
+float xm_fastcsch(float x) { return 2.0f / (xm_fastexp(x) - xm_fastexp(-x)); }
 
 // Code: https://gist.github.com/bitonic/d0f5a0a44e37d4f0be03d34d47acb6cf
 // Algorithm: sheet 11 of  "Approximations for digital computers", C. Hastings, 1955
@@ -271,9 +439,9 @@ float xm_fastatan(float x)
 // Code: https://gist.github.com/bitonic/d0f5a0a44e37d4f0be03d34d47acb6cf
 float xm_fastatan2(float x, float y)
 {
-    bool  swap       = fabs(x) < fabs(y);
+    bool  swap       = fabsf(x) < fabsf(y);
     float atan_input = (swap ? x : y) / (swap ? y : x);
-    if (fabs(x) == 0 && fabs(y) == 0)
+    if (fabsf(x) == 0 && fabsf(y) == 0)
         atan_input = 0;
 
     float res = xm_fastatan(atan_input);
@@ -287,49 +455,52 @@ float xm_fastatan2(float x, float y)
     return res;
 }
 
-// Blazing fast but lacks precision
-// https://github.com/ekmett/approximate/blob/master/cbits/fast.c
-/* 1065353216 - 486411 = 1064866805 */
-float xm_fasterlog(float a)
-{
-    union xm_fi32 u = {a};
-    return (u.i32 - 1064866805) * 8.262958405176314e-8f; /* 1 / 12102203.0; */
-}
+float xm_fastlog(float x) { return xm_fastlog2(x) * XM_LN2f; }
 
-// fasterlog * log10e
-float xm_fasterlog10(float a)
+float xm_fastlog2(float x)
 {
-    union xm_fi32 u = {a};
-    // return (u.x - 1064866805) * 8.262958405176314e-8f * log10e; /* 1 /
-    return (u.i32 - 1064866805) * 3.5885572395641675e-8f; /* 1 / 12102203.0; */
+    xm_fi32 vx = {.f = x};
+    xm_fi32 mx = {.u32 = (vx.u32 & 0x007FFFFF) | 0x3f000000};
+    float   y  = vx.u32;
+
+    y *= 1.1920928955078125e-7f;
+
+    return y - 124.22551499f - 1.498030302f * mx.f - 1.72587999f / (0.3520887068f + mx.f);
 }
 
 // Adapted from Paul Mineiro log2
 // https://github.com/romeric/fastapprox/blob/master/fastapprox/src/fastlog.h
 float xm_fastlog10(float x)
 {
-    union xm_fi32 vx = {.f = x};
-    union xm_fi32 mx = {.u32 = (vx.u32 & 0x007FFFFF) | 0x3f000000};
-    float         y  = vx.u32;
+    xm_fi32 vx = {.f = x};
+    xm_fi32 mx = {.u32 = (vx.u32 & 0x007FFFFF) | 0x3f000000};
+    float   y  = vx.u32;
 
     y *= 3.588557191657796e-8f;
 
     return y - 37.39560623879553f - 0.4509520553155725f * mx.f - 0.5195416459062518f / (0.3520887068f + mx.f);
 }
 
-// Paul Mineiro's exp2
-// https://github.com/romeric/fastapprox/blob/master/fastapprox/src/fastexp.h
-float xm_fastexp(float x)
+// Blazing fast but lacks precision
+// https://github.com/ekmett/approximate/blob/master/cbits/fast.c
+/* 1065353216 - 486411 = 1064866805 */
+float xm_fasterlog(float a)
 {
-    float         p      = 1.442695040f * x;
-    float         offset = (p < 0) ? 1.0f : 0.0f;
-    int           w      = (int)p;
-    float         z      = p - w + offset;
-    union xm_fi32 v      = {
-             .u32 = (uint32_t)((1 << 23) * (p + 121.2740575f + 27.7280233f / (4.84252568f - z) - 1.49012907f * z))};
-
-    return v.f;
+    xm_fi32 u = {a};
+    return (u.i32 - 1064866805) * 8.262958405176314e-8f; /* 1 / 12102203.0; */
 }
+
+// fasterlog * log10e
+float xm_fasterlog10(float a)
+{
+    xm_fi32 u = {a};
+    // return (u.x - 1064866805) * 8.262958405176314e-8f * log10e; /* 1 /
+    return (u.i32 - 1064866805) * 3.5885572395641675e-8f; /* 1 / 12102203.0; */
+}
+
+// Paul Mineiro's exp2(log2(e))
+// https://github.com/romeric/fastapprox/blob/master/fastapprox/src/fastexp.h
+float xm_fastexp(float x) { return xm_fastexp2(x * 1.442695040f); }
 float xm_fasterexp(float x)
 {
     // p. mineiros faster exp
@@ -339,7 +510,7 @@ float xm_fasterexp(float x)
 
     // ekmett_ub
     // https://github.com/ekmett/approximate/blob/master/cbits/fast.c
-    union xm_fi32 u = {.i32 = (int32_t)(12102203.0f * x + 1065353217.0f)};
+    xm_fi32 u = {.i32 = (int32_t)(12102203.0f * x + 1065353217.0f)};
     return u.f;
 }
 
@@ -349,10 +520,9 @@ float xm_fastexp2(float p)
 {
     float offset = (p < 0) ? 1.0f : 0.0f;
     // float clipp  = (p < -126) ? -126.0f : p;
-    int           w = (int)p;
-    float         z = p - w + offset;
-    union xm_fi32 v = {
-        .u32 = (uint32_t)((1 << 23) * (p + 121.2740575f + 27.7280233f / (4.84252568f - z) - 1.49012907f * z))};
+    int     w = (int)p;
+    float   z = p - w + offset;
+    xm_fi32 v = {.u32 = (uint32_t)((1 << 23) * (p + 121.2740575f + 27.7280233f / (4.84252568f - z) - 1.49012907f * z))};
 
     return v.f;
 }
@@ -368,13 +538,13 @@ float xm_fast_denomalise_Hz(float norm) { return 20 * xm_fastexp2(norm * 10); }
 // https://github.com/ekmett/approximate/blob/master/cbits/fast.c
 float xm_fast_normalise_Hz1(float Hz)
 {
-    union xm_fi32 u = {.f = Hz * 0.05f};
+    xm_fi32 u = {.f = Hz * 0.05f};
     return (u.i32 - 1064866805) * 1.1920929114219645e-08f; // ankerl32
 }
 
 float xm_fast_normalise_Hz2(float Hz)
 {
-    union xm_fi32 u = {Hz * 0.05f};
+    xm_fi32 u = {Hz * 0.05f};
     return (u.i32 - 1065353217) * 1.1920929114219645e-08f; // ekmett_lb
 }
 
