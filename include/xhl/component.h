@@ -157,6 +157,20 @@ struct xcomp_component
 };
 typedef struct xcomp_component xcomp_component;
 
+/* NOTE/IDEA: Below is a 24byte alternative, potentially a good solution for a v2 of xcomp
+struct xcomp_component2
+{
+    uint16_t x, y, w, h;
+
+    uint16_t byte_offset_parent; // If zero, root
+    uint16_t byte_offset_prev_sibling; // if zero, first child
+    uint16_t byte_offset_last_child; // if zero, no children
+    uint16_t flags;
+
+    void (*callback)(struct xcomp_component*, uint32_t event, xcomp_event_data data);
+};
+*/
+
 struct xcomp_root
 {
     // None of the following these pointers are owned
