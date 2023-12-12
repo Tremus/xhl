@@ -51,6 +51,7 @@ typedef union
     struct { float x, y, z; };
     struct { float r, g, b; };
     struct { xvec2f position; float skew; };
+    struct { float start, end, distance; };
     float data[3];
 } xvec3f;
 
