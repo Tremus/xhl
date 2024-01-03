@@ -7,7 +7,9 @@ typedef union
     struct { unsigned char tweak, patch, minor, major; };
     struct { unsigned char r, g, b, a; };
     struct { unsigned char red, green, blue, alpha; };
-    unsigned int u;
+    unsigned int u32;
+    int   i32;
+    float f32;
 } xvecu;
 
 typedef union
@@ -38,6 +40,7 @@ typedef union
     struct { float angle, magnitude; };
     struct { float phase, mag; };
     float data[2];
+    unsigned long long u64;
 } xvec2f;
 
 typedef union xvec3i
