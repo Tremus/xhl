@@ -157,6 +157,8 @@ float xm_fast_normalise_Hz2(float Hz);
  1 Bits  0
  *0*1*0*1*/
 
+void* xm_ptr_align(void* ptr, uint64_t alignment);
+
 uint32_t xm_next_po2u(uint32_t x);
 uint64_t xm_next_po2ull(uint64_t x);
 
@@ -591,6 +593,13 @@ float xm_midi_to_Hz(float midi)
 }
 
 float xm_fast_dB_to_gain(float dB) { return xm_fastexp2(dB * 0.166666667); }
+
+void* xm_ptr_align(void* ptr, uint64_t alignment)
+{
+    uint64_t address = (uint64_t)ptr;
+    uint64_t inc     = (alignment - (address % alignment)) % alignment;
+    return (void*)(address + inc);
+}
 
 uint32_t xm_next_po2u(uint32_t v)
 {
