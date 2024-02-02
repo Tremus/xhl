@@ -27,10 +27,10 @@
 #define xprintf printf
 #endif
 
-#if defined(_MSC_VER) && ! defined(__clang__)
-#define xstatic_assert(cond, msg) static_assert(cond, msg)
+#if ! defined(__cplusplus) && ! defined(_MSC_VER)
+#define xstatic_assert _Static_assert
 #else
-#define xstatic_assert(cond, msg) _Static_assert(cond, msg)
+#define xstatic_assert static_assert
 #endif
 
 #endif // XHL_DEBUG_H
