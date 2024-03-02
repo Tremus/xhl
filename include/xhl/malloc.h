@@ -24,7 +24,7 @@ void  xfree(void*);
 #include <errno.h>
 #include <stdlib.h>
 
-#ifdef _DEBUG
+#ifndef NDEBUG
 #include "./debug.h"
 // Not recommended for debugging in multi-instance & multi-threaded contexts.
 int g_num_xmallocs = 0;
@@ -32,14 +32,14 @@ int g_num_xmallocs = 0;
 
 void xmalloc_init()
 {
-#ifdef _DEBUG
+#ifndef NDEBUG
     g_num_xmallocs = 0;
 #endif
 }
 
 void xmalloc_shutdown()
 {
-#ifdef _DEBUG
+#ifndef NDEBUG
     xassert(g_num_xmallocs == 0);
 #endif
 }
@@ -49,7 +49,7 @@ void* xmalloc(size_t size)
     void* ptr = malloc(size);
     if (ptr == NULL)
         exit(ENOMEM);
-#ifdef _DEBUG
+#ifndef NDEBUG
     g_num_xmallocs++;
 #endif
     return ptr;
@@ -60,8 +60,8 @@ void* xrealloc(void* ptr, size_t new_size)
     void* new_ptr = realloc(ptr, new_size);
     if (new_ptr == NULL)
         exit(ENOMEM);
-#ifdef _DEBUG
-    if (ptr == NULL)
+#ifndef NDEBUG
+    if (ptr == NULL && new_size > 0)
         g_num_xmallocs++;
 #endif
     return new_ptr;
@@ -70,7 +70,7 @@ void* xrealloc(void* ptr, size_t new_size)
 void xfree(void* ptr)
 {
     free(ptr);
-#ifdef _DEBUG
+#ifndef NDEBUG
     g_num_xmallocs--;
     xassert(g_num_xmallocs >= 0);
 #endif
