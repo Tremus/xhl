@@ -14,13 +14,36 @@ double   xtime_convert_ns_to_sec(uint64_t ns);
 #ifdef __cplusplus
 }
 #endif
-
 #endif // XHL_TIME_H
 
 #ifdef XHL_TIME_IMPL
 #undef XHL_TIME_IMPL
 
-#ifdef __APPLE__
+#ifdef _WIN32
+#include <winnt.h>
+
+LARGE_INTEGER xhl_perffreq;
+LARGE_INTEGER xhl_timestart;
+
+void xtime_init()
+{
+    QueryPerformanceFrequency(&xhl_perffreq);
+    QueryPerformanceCounter(&xhl_timestart);
+}
+
+uint64_t xtime_now_ns()
+{
+    // Algo func taken from here:
+    // https://github.com/rust-lang/rust/blob/3809bbf47c8557bd149b3e52ceb47434ca8378d5/src/libstd/sys_common/mod.rs#L124
+    LARGE_INTEGER now;
+    QueryPerformanceCounter(&now);
+    now.QuadPart -= xhl_timestart.QuadPart;
+    INT64 q      = now.QuadPart / xhl_perffreq.QuadPart;
+    INT64 r      = now.QuadPart % xhl_perffreq.QuadPart;
+    return q * 1000000000 + r * 1000000000 / xhl_perffreq.QuadPart;
+}
+
+#elif defined(__APPLE__) // endif _WIN32
 #include <mach/mach_time.h>
 
 mach_timebase_info_data_t xhl_timebase;
@@ -42,6 +65,7 @@ uint64_t xtime_now_ns()
 }
 
 #endif // __APPLE__
+
 
 double xtime_convert_ns_to_ms(uint64_t ns) { return (double)ns / 1.e6; }
 double xtime_convert_ns_to_sec(uint64_t ns) { return (double)ns / 1.e9; }
