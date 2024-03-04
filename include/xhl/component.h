@@ -667,8 +667,8 @@ void xcomp_send_mouse_up(xcomp_root* root, xcomp_event_data info)
     xcomp_position   pos  = {.x = info.x, .y = info.y};
     xcomp_component* comp = xcomp_find_child_at(root->main, pos);
 
-    // handle left button
-    if ((info.modifiers & XCOMP_MOD_LEFT_BUTTON) && root->mouse_left_down != NULL)
+    // release left button
+    if (root->mouse_left_down != NULL && (info.modifiers & XCOMP_MOD_LEFT_BUTTON) == 0)
     {
         xcomp_component* last_comp = root->mouse_left_down;
         root->mouse_left_down      = NULL;
@@ -709,8 +709,8 @@ void xcomp_send_mouse_up(xcomp_root* root, xcomp_event_data info)
         }
     }
 
-    // handle right button
-    if ((info.modifiers & XCOMP_MOD_RIGHT_BUTTON) && root->mouse_right_down != NULL)
+    // release right button
+    if (root->mouse_right_down != NULL && (info.modifiers & XCOMP_MOD_RIGHT_BUTTON) == 0)
     {
         xcomp_component* last_comp = root->mouse_right_down;
         root->mouse_right_down     = NULL;
@@ -728,8 +728,8 @@ void xcomp_send_mouse_up(xcomp_root* root, xcomp_event_data info)
         }
     }
 
-    // handle middle button
-    if ((info.modifiers & XCOMP_MOD_MIDDLE_BUTTON) && root->mouse_middle_down != NULL)
+    // release middle button
+    if (root->mouse_middle_down != NULL && (info.modifiers & XCOMP_MOD_MIDDLE_BUTTON) == 0)
     {
         xcomp_component* last_comp = root->mouse_middle_down;
         root->mouse_middle_down    = NULL;
