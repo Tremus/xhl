@@ -1,24 +1,19 @@
 #ifndef XHL_DEBUG_H
 #define XHL_DEBUG_H
 
-#if defined(DEBUG) || defined(_DEBUG)
-
-#ifdef _MSC_VER
-#define XHL_DEBUG_BREAK __debugbreak()
-#elif __APPLE__
-#define XHL_DEBUG_BREAK __builtin_debugtrap()
-#else
-#error Unknown environment
-#endif
-
-#define xassert(cond) (cond) ? (void)0 : XHL_DEBUG_BREAK
-
-#else // NDEBUG
-#define XHL_DEBUG_BREAK
+#ifdef NDEBUG
 // clang-format off
 #define xassert(cond) do { (void)(cond); } while (0)
 // clang-format on
+#else // _DEBUG
+
+#ifdef _WIN32
+#define xassert(cond) (cond) ? (void)0 : __debugbreak()
+#else
+#define xassert(cond) (cond) ? (void)0 : __builtin_debugtrap()
 #endif
+
+#endif // _DEBUG
 
 #ifdef _WIN32
 // Prints to VSCode debug console properly
