@@ -30,6 +30,7 @@
 #if ! defined(__cplusplus) && ! defined(_MSC_VER)
 #define xstatic_assert _Static_assert
 #else
+#include <assert.h>
 #define xstatic_assert static_assert
 #endif
 
