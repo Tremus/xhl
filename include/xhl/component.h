@@ -183,6 +183,9 @@ struct xcomp_root
     // xcomp_root_clear() & xcomp_root_refresh()
     xcomp_component* mouse_over;
     xcomp_component* mouse_left_down;
+    xcomp_component* mouse_last_left_click;
+    uint32_t         last_left_click_time;
+    uint32_t         left_click_counter;
     xcomp_component* mouse_right_down;
     xcomp_component* mouse_middle_down;
     xcomp_component* mouse_drag_over;
@@ -244,7 +247,7 @@ xcomp_component* xcomp_find_parent_at(xcomp_component*, xcomp_position);
 // ROOT METHODS
 void xcomp_send_mouse_position(xcomp_root*, xcomp_event_data info);
 void xcomp_send_mouse_down(xcomp_root*, xcomp_event_data info);
-void xcomp_send_mouse_up(xcomp_root*, xcomp_event_data info);
+void xcomp_send_mouse_up(xcomp_root*, xcomp_event_data, uint32_t time_ms, uint32_t double_click_interval_ms);
 void xcomp_send_keyboard_message(xcomp_root*, xcomp_event_data info);
 // set component to NULL to remove focus
 void xcomp_root_give_keyboard_focus(xcomp_root*, xcomp_component* comp);
@@ -664,7 +667,7 @@ void xcomp_send_mouse_down(xcomp_root* root, xcomp_event_data info)
     }
 }
 
-void xcomp_send_mouse_up(xcomp_root* root, xcomp_event_data info)
+void xcomp_send_mouse_up(xcomp_root* root, xcomp_event_data info, uint32_t time_ms, uint32_t double_click_interval_ms)
 {
     xcomp_position   pos  = {.x = info.x, .y = info.y};
     xcomp_component* comp = xcomp_find_child_at(root->main, pos);
@@ -699,8 +702,24 @@ void xcomp_send_mouse_up(xcomp_root* root, xcomp_event_data info)
 
         if (last_comp == comp)
         {
-            last_comp->event_handler(last_comp, XCOMP_EVENT_MOUSE_LEFT_CLICK, info);
-            // TODO: record time and component in case of a double click
+            uint32_t diff = time_ms - root->last_left_click_time;
+
+            if (root->mouse_last_left_click != last_comp)
+                root->left_click_counter = 0;
+            if (diff > double_click_interval_ms)
+                root->left_click_counter = 0;
+
+            root->left_click_counter++;
+            root->last_left_click_time  = time_ms;
+            root->mouse_last_left_click = comp;
+
+            uint32_t clicks = root->left_click_counter % 3;
+            if (clicks == 0)
+                comp->event_handler(comp, XCOMP_EVENT_MOUSE_LEFT_TRIPLE_CLICK, info);
+            else if (clicks == 1)
+                last_comp->event_handler(last_comp, XCOMP_EVENT_MOUSE_LEFT_CLICK, info);
+            else if (clicks == 2)
+                comp->event_handler(comp, XCOMP_EVENT_MOUSE_LEFT_DOUBLE_CLICK, info);
         }
         // If components do not match, the component must have been dragged into
         // different boundaries. We need to find which component the mouse is
@@ -765,11 +784,14 @@ void xcomp_root_clear(xcomp_root* root)
     xcomp_component* last_keyboard_focus    = root->keyboard_focus;
     xcomp_event_data edata                  = {.x = root->position.x, .y = root->position.y, .modifiers = 0};
 
-    root->mouse_over        = NULL;
-    root->mouse_left_down   = NULL;
-    root->mouse_right_down  = NULL;
-    root->mouse_middle_down = NULL;
-    root->mouse_drag_over   = NULL;
+    root->mouse_over            = NULL;
+    root->mouse_left_down       = NULL;
+    root->mouse_last_left_click = NULL;
+    root->last_left_click_time  = 0;
+    root->left_click_counter    = 0;
+    root->mouse_right_down      = NULL;
+    root->mouse_middle_down     = NULL;
+    root->mouse_drag_over       = NULL;
 
     xcomp_root_give_keyboard_focus(root, NULL);
 
