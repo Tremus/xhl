@@ -32,6 +32,7 @@ enum xcomp_event
     XCOMP_EVENT_MOUSE_LEFT_UP,
     XCOMP_EVENT_MOUSE_LEFT_CLICK,
     XCOMP_EVENT_MOUSE_LEFT_DOUBLE_CLICK,
+    XCOMP_EVENT_MOUSE_LEFT_TRIPLE_CLICK,
     XCOMP_EVENT_MOUSE_RIGHT_DOWN,
     XCOMP_EVENT_MOUSE_RIGHT_UP,
     XCOMP_EVENT_MOUSE_RIGHT_CLICK,
@@ -52,7 +53,8 @@ enum xcomp_event
     // keyboard
     XCOMP_EVENT_KEY_DOWN,
     XCOMP_EVENT_KEY_UP,
-    XCOMP_EVENT_KEYBOARD_FOCUS_CHANGED,
+    XCOMP_EVENT_KEYBOARD_FOCUS_GAINED,
+    XCOMP_EVENT_KEYBOARD_FOCUS_LOST,
 };
 
 enum xcomp_flag
@@ -314,7 +316,7 @@ void xcomp_root_give_keyboard_focus(xcomp_root* root, xcomp_component* next_comp
     if (last_comp != NULL && (last_comp->flags & XCOMP_FLAG_HAS_KEYBOARD_FOCUS))
     {
         last_comp->flags &= ~XCOMP_FLAG_HAS_KEYBOARD_FOCUS;
-        last_comp->event_handler(last_comp, XCOMP_EVENT_KEYBOARD_FOCUS_CHANGED, edata);
+        last_comp->event_handler(last_comp, XCOMP_EVENT_KEYBOARD_FOCUS_LOST, edata);
     }
 
     // check should take keyboard focus
@@ -322,7 +324,7 @@ void xcomp_root_give_keyboard_focus(xcomp_root* root, xcomp_component* next_comp
         ! (next_comp->flags & XCOMP_FLAG_HAS_KEYBOARD_FOCUS))
     {
         next_comp->flags |= XCOMP_FLAG_HAS_KEYBOARD_FOCUS;
-        next_comp->event_handler(next_comp, XCOMP_EVENT_KEYBOARD_FOCUS_CHANGED, edata);
+        next_comp->event_handler(next_comp, XCOMP_EVENT_KEYBOARD_FOCUS_GAINED, edata);
     }
 }
 
@@ -627,7 +629,7 @@ void xcomp_send_mouse_down(xcomp_root* root, xcomp_event_data info)
             xcomp_component* last_comp = root->keyboard_focus;
             root->keyboard_focus       = NULL;
             last_comp->flags           &= ~XCOMP_FLAG_HAS_KEYBOARD_FOCUS;
-            last_comp->event_handler(last_comp, XCOMP_EVENT_KEYBOARD_FOCUS_CHANGED, info);
+            last_comp->event_handler(last_comp, XCOMP_EVENT_KEYBOARD_FOCUS_LOST, info);
         }
 
         if (comp->flags & XCOMP_FLAG_WANTS_KEYBOARD_FOCUS)
