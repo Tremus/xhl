@@ -39,7 +39,16 @@ enum xcomp_event
     XCOMP_EVENT_MOUSE_MIDDLE_DOWN,
     XCOMP_EVENT_MOUSE_MIDDLE_UP,
     XCOMP_EVENT_MOUSE_MIDDLE_CLICK,
-    XCOMP_EVENT_MOUSE_WHEEL,
+    // Values should be in 120ths. This is the default value on Windows using:
+    // case WM_SCROLLWHEEL: {
+    //     int deltaY = HIWORD(wParam);
+    // macOS is trickier, but the Y value can be obtained using:
+    // - (void)scrollWheel:(NSEvent*)event {
+    // int deltaX = CGEventGetIntegerValueField([event CGEvent], kCGScrollWheelEventDeltaAxis2) * 120 // x is axis 2
+    // int deltaY = CGEventGetIntegerValueField([event CGEvent], kCGScrollWheelEventDeltaAxis1) * 120
+    XCOMP_EVENT_MOUSE_SCROLL_WHEEL,
+    // See: [NSEvent hasPreciseScrollingDeltas]
+    XCOMP_EVENT_MOUSE_SCROLL_TOUCHPAD,
     XCOMP_EVENT_MOUSE_PINCH,
     // Dragging
     // These are sent to the component being dragged
@@ -81,12 +90,9 @@ enum xcomp_modifier
     XCOMP_MOD_CTRL_BUTTON   = 1 << 3,
     XCOMP_MOD_ALT_BUTTON    = 1 << 4,
     XCOMP_MOD_SHIFT_BUTTON  = 1 << 5,
-    // Flag set when using 2+ finger gestures on Apple devices
-    // See: [NSEvent hasPreciseScrollingDeltas]
-    XCOMP_MOD_PRECISE_SCROLL = 1 << 6,
     // Flag set when touch events are inverted on Apple devices
     // See: [NSEvent isDirectionInvertedFromDevice]
-    XCOMP_MOD_INVERTED_SCROLL = 1 << 7,
+    XCOMP_MOD_INVERTED_SCROLL = 1 << 6,
 };
 
 union xcomp_position
