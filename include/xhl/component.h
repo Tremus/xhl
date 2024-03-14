@@ -60,7 +60,8 @@ enum xcomp_event
     XCOMP_EVENT_DRAG_EXIT,
     XCOMP_EVENT_DRAG_DROP,
     // keyboard
-    XCOMP_EVENT_KEY_DOWN,
+    XCOMP_EVENT_KEY_TEXT, // for sending text to widgets
+    XCOMP_EVENT_KEY_DOWN, // for anything else responing to key events
     XCOMP_EVENT_KEY_UP,
     XCOMP_EVENT_KEYBOARD_FOCUS_GAINED,
     XCOMP_EVENT_KEYBOARD_FOCUS_LOST,
