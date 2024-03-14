@@ -15,7 +15,7 @@ extern "C" {
 #include <stddef.h>
 #include <stdint.h>
 
-enum xcomp_event
+enum
 {
     XCOMP_EVENT_PAINT,
     // geometry
@@ -67,7 +67,7 @@ enum xcomp_event
     XCOMP_EVENT_KEYBOARD_FOCUS_LOST,
 };
 
-enum xcomp_flag
+enum
 {
     XCOMP_FLAG_IS_DISABLED          = 1 << 0,
     XCOMP_FLAG_IS_HIDDEN            = 1 << 1,
@@ -83,7 +83,7 @@ enum xcomp_flag
     XCOMP_FLAG_HAS_KEYBOARD_FOCUS   = 1 << 9,
 };
 
-enum xcomp_modifier
+enum
 {
     XCOMP_MOD_LEFT_BUTTON   = 1 << 0,
     XCOMP_MOD_RIGHT_BUTTON  = 1 << 1,
@@ -96,6 +96,14 @@ enum xcomp_modifier
     // Flag set when touch events are inverted on Apple devices
     // See: [NSEvent isDirectionInvertedFromDevice]
     XCOMP_MOD_INVERTED_SCROLL = 1 << 8,
+
+#ifdef _WIN32
+    XCOMP_MOD_PLATFORM_KEY_CTRL = XCOMP_MOD_KEY_CTRL,
+    XCOMP_MOD_PLATFORM_KEY_ALT  = XCOMP_MOD_KEY_ALT,
+#elif defined(__APPLE__)
+    XCOMP_MOD_PLATFORM_KEY_CTRL = XCOMP_MOD_KEY_CMD,
+    XCOMP_MOD_PLATFORM_KEY_ALT  = XCOMP_MOD_KEY_OPTION,
+#endif
 };
 
 union xcomp_position
