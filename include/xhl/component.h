@@ -88,12 +88,14 @@ enum xcomp_modifier
     XCOMP_MOD_LEFT_BUTTON   = 1 << 0,
     XCOMP_MOD_RIGHT_BUTTON  = 1 << 1,
     XCOMP_MOD_MIDDLE_BUTTON = 1 << 2,
-    XCOMP_MOD_CTRL_BUTTON   = 1 << 3,
-    XCOMP_MOD_ALT_BUTTON    = 1 << 4,
-    XCOMP_MOD_SHIFT_BUTTON  = 1 << 5,
+    XCOMP_MOD_KEY_CTRL      = 1 << 3,
+    XCOMP_MOD_KEY_ALT       = 1 << 4,
+    XCOMP_MOD_KEY_SHIFT     = 1 << 5,
+    XCOMP_MOD_KEY_CMD       = 1 << 6,
+    XCOMP_MOD_KEY_OPTION    = 1 << 7,
     // Flag set when touch events are inverted on Apple devices
     // See: [NSEvent isDirectionInvertedFromDevice]
-    XCOMP_MOD_INVERTED_SCROLL = 1 << 6,
+    XCOMP_MOD_INVERTED_SCROLL = 1 << 8,
 };
 
 union xcomp_position
@@ -275,7 +277,7 @@ bool xcomp_is_popup_menu(uint64_t mods)
 {
     return
 #ifdef __APPLE__
-        ((mods & (XCOMP_MOD_CTRL_BUTTON | XCOMP_MOD_LEFT_BUTTON)) == (XCOMP_MOD_CTRL_BUTTON | XCOMP_MOD_LEFT_BUTTON)) ||
+        ((mods & (XCOMP_MOD_KEY_CTRL | XCOMP_MOD_LEFT_BUTTON)) == (XCOMP_MOD_KEY_CTRL | XCOMP_MOD_LEFT_BUTTON)) ||
 #endif
         (mods & XCOMP_MOD_RIGHT_BUTTON);
 }
