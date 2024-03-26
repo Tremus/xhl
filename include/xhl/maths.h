@@ -162,16 +162,15 @@ uint64_t xm_align_up(uint64_t value, uint64_t alignment);
 uint32_t xm_next_po2u(uint32_t x);
 uint64_t xm_next_po2ull(uint64_t x);
 
-// Find idx of first low bit. eg: 1 = 0, 2 = 1, 3 = 0, 4 = 2, 5 = 0, 6 = 2 etc.
-// If input is 0, the result is 64
-uint64_t xm_ctzull(uint64_t x);
-// If input is 0, the result is 32
-uint32_t xm_ctzu(uint32_t x);
-// Find idx of first high bit. eg (1ULL << 63) = 0, (1ULL << 62) = 1, etc.
-// If input is 0, the result is 64
-uint64_t xm_clzull(uint64_t x);
-// If input is 0, the result is 32
+// 'Count leading zero'. Count num zeros starting from the most significant bit. 0 == 32, 1 == 31, 2 == 30, 4 == 29 etc.
 uint32_t xm_clzu(uint32_t x);
+uint64_t xm_clzull(uint64_t x);
+// 'Count trailing zeros'. Count num zeros starting from the least significant bit. 0 == 32, 1 == 0, 2 == 1, 4 == 2 etc.
+uint32_t xm_ctzu(uint32_t x);
+uint64_t xm_ctzull(uint64_t x);
+// Count 1 bits
+uint32_t xm_popcountu(uint32_t x);
+uint32_t xm_popcountull(uint64_t x);
 
 // https://en.wikipedia.org/wiki/Xorshift
 uint32_t xm_xorshift32(uint32_t x);
@@ -417,9 +416,9 @@ float xm_fastersin(float x)
     static const float fouroverpisq = 0.40528473456935109f;
     static const float q            = 0.77633023248007499f;
 
-    xm_fi32  p    = {.f = 0.22308510060189463f};
-    xm_fi32  vx   = {.f = x};
-    uint32_t sign = vx.u32 & 0x80000000;
+    xm_fi32  p     = {.f = 0.22308510060189463f};
+    xm_fi32  vx    = {.f = x};
+    uint32_t sign  = vx.u32 & 0x80000000;
     vx.u32        &= 0x7FFFFFFF;
 
     float qpprox = fouroverpi * x - fouroverpisq * x * vx.f;
@@ -627,56 +626,45 @@ uint64_t xm_next_po2ull(uint64_t v)
 
 #if defined(__GNUC__) || defined(__clang__)
 
-uint64_t xm_ctzull(uint64_t x)
-{
-    uint64_t y = __builtin_ctzll(x);
-    return x == 0 ? 64 : y;
-}
+uint32_t xm_clzu(uint32_t x) { return __builtin_clz(x); }
+uint64_t xm_clzull(uint64_t x) { return __builtin_clzll(x); }
+uint32_t xm_ctzu(uint32_t x) { return __builtin_ctz(x); }
+uint64_t xm_ctzull(uint64_t x) { return __builtin_ctzll(x); }
 
-uint32_t xm_ctzu(uint32_t x)
-{
-    uint32_t y = __builtin_ctzll(x);
-    return x == 0 ? 32 : y;
-}
+uint32_t xm_popcountu(uint32_t x) { return __builtin_popcount(x); }
+uint32_t xm_popcountull(uint64_t x) { return __builtin_popcountll(x); }
 
-uint64_t xm_clzull(uint64_t x)
-{
-    uint64_t y = __builtin_ctzll(x);
-    return x == 0 ? 64 : y;
-}
-
-uint32_t xm_clzu(uint32_t x)
-{
-    uint64_t y = __builtin_ctzll(x);
-    return x == 0 ? 64 : y;
-}
 #elif defined(_MSC_VER)
 
 #include <intrin.h>
 
-uint64_t xm_ctzull(uint64_t mask)
+uint32_t xm_clzu(uint32_t Mask)
 {
-    unsigned long index;
-    return _BitScanForward64(&index, mask) ? index : 64;
+    unsigned long Index;
+    return _BitScanReverse(&Index, Mask) ? 31 - Index : 32;
 }
 
-uint32_t xm_ctzu(uint32_t mask)
+uint64_t xm_clzull(uint64_t Mask)
 {
-    unsigned long index;
-    return _BitScanForward(&index, mask) ? index : 32;
+    unsigned long Index;
+    return _BitScanReverse64(&Index, Mask) ? 63 - Index : 64;
 }
 
-uint64_t xm_clzull(uint64_t mask)
+uint32_t xm_ctzu(uint32_t Mask)
 {
-    unsigned long index;
-    return _BitScanReverse64(&index, mask) ? 63 - index : 64;
+    unsigned long Index;
+    return _BitScanForward(&Index, Mask) ? Index : 32;
 }
 
-uint32_t xm_clzu(uint32_t mask)
+uint64_t xm_ctzull(uint64_t Mask)
 {
-    unsigned long index;
-    return _BitScanReverse(&index, mask) ? 31 - index : 32;
+    unsigned long Index;
+    return _BitScanForward64(&Index, Mask) ? Index : 64;
 }
+
+uint32_t xm_popcountu(uint32_t x) { return __popcnt(x); }
+uint32_t xm_popcountull(uint64_t x) { return __popcnt64(x); }
+
 #else
 #error Unknown compiler!
 #endif
