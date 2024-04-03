@@ -190,7 +190,7 @@ struct xcomp_component2
 };
 */
 
-struct xcomp_root
+typedef struct xcomp_root
 {
     // None of the following these pointers are owned
     // Main is your root level component
@@ -209,8 +209,8 @@ struct xcomp_root
     xcomp_component* keyboard_focus;
 
     xcomp_position position;
-};
-typedef struct xcomp_root xcomp_root;
+    xcomp_position mouse_down_pos; // Used for preventing 1px drag events that should be clicks
+} xcomp_root;
 
 // GEOMETRY METHODS
 
@@ -317,6 +317,8 @@ bool xcomp_is_enabled(xcomp_component* comp)
 
 #ifdef XHL_COMPONENT_IMPL
 #undef XHL_COMPONENT_IMPL
+
+#include <math.h> // fabf, hypotf
 
 #ifdef __cplusplus
 extern "C" {
@@ -575,6 +577,9 @@ void xcomp_send_mouse_position(xcomp_root* root, xcomp_event_data info)
     // Check for drag
     else if (last_over == root->mouse_left_down)
     {
+        float distance_x = fabsf(root->mouse_down_pos.x - info.x);
+        float distance_y = fabsf(root->mouse_down_pos.y - info.y);
+        float distance_r = hypotf(distance_x, distance_y);
         // Check still dragging
         if (last_over->flags & XCOMP_FLAG_IS_DRAGGING)
         {
@@ -601,7 +606,7 @@ void xcomp_send_mouse_position(xcomp_root* root, xcomp_event_data info)
                 }
             }
         }
-        else
+        else if (distance_r > 5)
         {
             last_over->flags |= XCOMP_FLAG_IS_DRAGGING;
             last_over->event_handler(last_over, XCOMP_EVENT_DRAG_START, info);
@@ -659,6 +664,8 @@ void xcomp_send_mouse_down(xcomp_root* root, xcomp_event_data info)
         if ((info.modifiers & XCOMP_MOD_LEFT_BUTTON) && root->mouse_left_down == NULL)
         {
             root->mouse_left_down  = comp;
+            root->mouse_down_pos.x = info.x;
+            root->mouse_down_pos.y = info.y;
             comp->flags           |= XCOMP_FLAG_IS_MOUSE_LEFT_DOWN;
 
             comp->event_handler(comp, XCOMP_EVENT_MOUSE_LEFT_DOWN, info);
@@ -704,8 +711,6 @@ void xcomp_send_mouse_up(xcomp_root* root, xcomp_event_data info, uint32_t time_
 
         if (dragging)
         {
-            // root->last_left_click_time = 0;
-            // root->left_click_counter   = 0;
             if (root->mouse_drag_over != NULL)
             {
                 xcomp_component* last_drag_over = root->mouse_drag_over;
@@ -737,7 +742,7 @@ void xcomp_send_mouse_up(xcomp_root* root, xcomp_event_data info, uint32_t time_
             if (clicks == 0)
                 comp->event_handler(comp, XCOMP_EVENT_MOUSE_LEFT_TRIPLE_CLICK, info);
             else if (clicks == 1)
-                last_comp->event_handler(last_comp, XCOMP_EVENT_MOUSE_LEFT_CLICK, info);
+                comp->event_handler(comp, XCOMP_EVENT_MOUSE_LEFT_CLICK, info);
             else if (clicks == 2)
                 comp->event_handler(comp, XCOMP_EVENT_MOUSE_LEFT_DOUBLE_CLICK, info);
         }
