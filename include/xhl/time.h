@@ -11,6 +11,15 @@ uint64_t xtime_now_ns();
 double   xtime_convert_ns_to_ms(uint64_t ns);
 double   xtime_convert_ns_to_sec(uint64_t ns);
 
+#ifndef NDEBUG
+// Quick an dirty performance timer that won't show up in release. Should be thread safe.
+void xtime_stopwatch_start();
+void xtime_stopwatch_log_ms(const char* msg_prefix); // Resets stopwatch
+#else
+#define xtime_stopwatch_start()
+#define xtime_stopwatch_log_ms(...)
+#endif
+
 #ifdef __cplusplus
 }
 #endif
@@ -69,5 +78,21 @@ uint64_t xtime_now_ns()
 
 double xtime_convert_ns_to_ms(uint64_t ns) { return (double)ns / 1.e6; }
 double xtime_convert_ns_to_sec(uint64_t ns) { return (double)ns / 1.e9; }
+
+#ifndef NDEBUG
+#include <stdio.h>
+static _Thread_local uint64_t g_xhl_stopwatch = 0;
+void xtime_stopwatch_start()
+{
+    g_xhl_stopwatch = xtime_now_ns();
+}
+void xtime_stopwatch_log_ms(const char* msg_prefix)
+{
+    uint64_t now = xtime_now_ns();
+    double ms = xtime_convert_ns_to_ms(now - g_xhl_stopwatch);
+    g_xhl_stopwatch = now;
+    fprintf(stderr, "%s: %.2fms\n", msg_prefix, ms);
+}
+#endif
 
 #endif // XHL_TIME_IMPL
