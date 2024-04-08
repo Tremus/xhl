@@ -1,5 +1,5 @@
-#ifndef XHL_MALLOC_H
-#define XHL_MALLOC_H
+#ifndef XHL_ALLOC_H
+#define XHL_ALLOC_H
 // Quick and dirty xmalloc
 
 #include <stddef.h>
@@ -17,15 +17,19 @@ void  xfree(void*);
 #ifdef __cplusplus
 }
 #endif
-#endif // XHL_MALLOC_H
+#endif // XHL_ALLOC_H
 
-#ifdef XHL_MALLOC_IMPL
-#undef XHL_MALLOC_IMPL
+#ifdef XHL_ALLOC_IMPL
+#undef XHL_ALLOC_IMPL
 #include <errno.h>
 #include <stdlib.h>
 
 #ifndef NDEBUG
-#include "./debug.h"
+#ifdef _WIN32
+#define xalloc_assert(cond) (cond) ? (void)0 : __debugbreak()
+#else
+#define xalloc_assert(cond) (cond) ? (void)0 : __builtin_debugtrap()
+#endif
 // Not recommended for debugging in multi-instance & multi-threaded contexts.
 int g_num_xmallocs = 0;
 #endif
@@ -72,8 +76,8 @@ void xfree(void* ptr)
     free(ptr);
 #ifndef NDEBUG
     g_num_xmallocs--;
-    xassert(g_num_xmallocs >= 0);
+    xalloc_assert(g_num_xmallocs >= 0);
 #endif
 }
 
-#endif
+#endif // XHL_ALLOC_IMPL
