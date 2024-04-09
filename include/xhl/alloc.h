@@ -8,15 +8,16 @@
 extern "C" {
 #endif
 
-void xmalloc_init();
-void xmalloc_shutdown();
+// For leak detector
+void xalloc_init();
+void xalloc_shutdown();
 
 void* xmalloc(size_t size);
 void* xrealloc(void*, size_t size);
 void* xcalloc(size_t num, size_t size);
 void  xfree(void*);
 
-void* xvalloc(uint64_t size);
+void* xvalloc(void* hint, uint64_t size);
 void  xvfree(void* ptr, uint64_t size);
 
 #ifdef __cplusplus
@@ -42,7 +43,7 @@ int g_num_xvallocs = 0;
 #define xalloc_assert(...)
 #endif
 
-void xmalloc_init()
+void xalloc_init()
 {
 #ifndef NDEBUG
     g_num_xmallocs = 0;
@@ -50,7 +51,7 @@ void xmalloc_init()
 #endif
 }
 
-void xmalloc_shutdown()
+void xalloc_shutdown()
 {
 #ifndef NDEBUG
     xassert(g_num_xmallocs == 0);
@@ -107,11 +108,11 @@ void xfree(void* ptr)
 #define XHL_PAGE_READWRITE 0x04
 
 void* __stdcall VirtualAlloc(void* lpAddress, size_t dwSize, unsigned long flAllocationType, unsigned long flProtect);
-int   __stdcall VirtualFree (void* address, size_t size, unsigned long free_type);
+int __stdcall VirtualFree(void* address, size_t size, unsigned long free_type);
 
-void* xvalloc(uint64_t size)
+void* xvalloc(void* hint, uint64_t size)
 {
-    void* ptr = VirtualAlloc(NULL, size, XHL_MEM_COMMIT | XHL_MEM_RESERVE, XHL_PAGE_READWRITE);
+    void* ptr = VirtualAlloc(hint, size, XHL_MEM_COMMIT | XHL_MEM_RESERVE, XHL_PAGE_READWRITE);
     xalloc_assert(ptr != NULL);
 #ifndef NDEBUG
     g_num_xvallocs++;
@@ -129,8 +130,34 @@ void xvfree(void* ptr, uint64_t size)
 #endif
 }
 
+#else // !_WIN32
+
+#ifdef __APPLE__
+#include <sys/mman.h>
 #else
-#error TODO: unix
+#error Unknown unix
+#endif
+
+void* xvalloc(void* hint, uint64_t size)
+{
+    void* ptr = mmap(hint, size, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
+#ifndef NDEBUG
+    xalloc_assert((uint64_t)ptr != 0xffffffffffffffff);
+    g_num_xvallocs++;
+#endif
+    return ptr;
+}
+
+void xvfree(void* ptr, uint64_t size)
+{
+    xalloc_assert(ptr != NULL);
+    munmap(ptr, size);
+#ifndef NDEBUG
+    g_num_xvallocs--;
+    xalloc_assert(g_num_xvallocs >= 0);
+#endif
+}
+
 #endif
 
 #endif // XHL_ALLOC_IMPL
