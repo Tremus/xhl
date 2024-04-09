@@ -7,12 +7,17 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
 void xmalloc_init();
 void xmalloc_shutdown();
 
 void* xmalloc(size_t size);
 void* xrealloc(void*, size_t size);
+void* xcalloc(size_t num, size_t size);
 void  xfree(void*);
+
+void* xvalloc(uint64_t size);
+void  xvfree(void* ptr, uint64_t size);
 
 #ifdef __cplusplus
 }
@@ -32,12 +37,16 @@ void  xfree(void*);
 #endif
 // Not recommended for debugging in multi-instance & multi-threaded contexts.
 int g_num_xmallocs = 0;
+int g_num_xvallocs = 0;
+#else
+#define xalloc_assert(...)
 #endif
 
 void xmalloc_init()
 {
 #ifndef NDEBUG
     g_num_xmallocs = 0;
+    g_num_xvallocs = 0;
 #endif
 }
 
@@ -45,6 +54,7 @@ void xmalloc_shutdown()
 {
 #ifndef NDEBUG
     xassert(g_num_xmallocs == 0);
+    xassert(g_num_xvallocs == 0);
 #endif
 }
 
@@ -71,6 +81,17 @@ void* xrealloc(void* ptr, size_t new_size)
     return new_ptr;
 }
 
+void* xcalloc(size_t num, size_t size)
+{
+    void* ptr = calloc(num, size);
+    if (ptr == NULL)
+        exit(ENOMEM);
+#ifndef NDEBUG
+    g_num_xmallocs++;
+#endif
+    return ptr;
+}
+
 void xfree(void* ptr)
 {
     free(ptr);
@@ -79,5 +100,37 @@ void xfree(void* ptr)
     xalloc_assert(g_num_xmallocs >= 0);
 #endif
 }
+
+#ifdef _WIN32
+#define XHL_MEM_COMMIT     0x00001000
+#define XHL_MEM_RESERVE    0x00002000
+#define XHL_PAGE_READWRITE 0x04
+
+void* __stdcall VirtualAlloc(void* lpAddress, size_t dwSize, unsigned long flAllocationType, unsigned long flProtect);
+int   __stdcall VirtualFree (void* address, size_t size, unsigned long free_type);
+
+void* xvalloc(uint64_t size)
+{
+    void* ptr = VirtualAlloc(NULL, size, XHL_MEM_COMMIT | XHL_MEM_RESERVE, XHL_PAGE_READWRITE);
+    xalloc_assert(ptr != NULL);
+#ifndef NDEBUG
+    g_num_xvallocs++;
+#endif
+    return ptr;
+}
+
+void xvfree(void* ptr, uint64_t size)
+{
+    xalloc_assert(ptr != NULL);
+    VirtualFree(ptr, size, 0);
+#ifndef NDEBUG
+    g_num_xvallocs--;
+    xalloc_assert(g_num_xvallocs >= 0);
+#endif
+}
+
+#else
+#error TODO: unix
+#endif
 
 #endif // XHL_ALLOC_IMPL

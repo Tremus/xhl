@@ -79,12 +79,12 @@ Simple macros for pausing your debugger.
 xassert(2 + 2 == 5); // pause
 ```
 
-### [malloc.h](include/xhl/malloc.h)
+### [alloc.h](include/xhl/alloc.h)
 
-Throw _"safety"_ to the wind with **xmalloc**! Wraps `malloc`, calling `exit(ENOMEM)` if `NULL` is returned. Additionally tracks number of `xmalloc` calls in `DEBUG` to help spot memory leaks.
+Wraps `malloc`, calling `exit(ENOMEM)` if `NULL` is returned. Additionally tracks number of `xmalloc` calls in `DEBUG` to help spot memory leaks.
 
 ```c
-#include <xhl/malloc.h>
+#include <xhl/alloc.h>
 int main() {
     // will exit with ENOMEM
     int* nums = xmalloc(1U << 63);
