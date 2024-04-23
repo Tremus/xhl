@@ -64,15 +64,21 @@ uint64_t xtime_now_ns()
 uint64_t xtime_unix_ms() { return xhl_unixtime_init + xtime_now_ns() / 1000000; }
 
 #elif defined(__APPLE__) // endif _WIN32
+#include <CoreFoundation/CoreFoundation.h>
 #include <mach/mach_time.h>
 
 mach_timebase_info_data_t xhl_timebase;
 uint64_t                  xhl_start_machtime;
+uint64_t                  xhl_unixtime_init;
 
 void xtime_init()
 {
     xhl_start_machtime = mach_absolute_time();
     mach_timebase_info(&xhl_timebase);
+
+    CFAbsoluteTime now = CFAbsoluteTimeGetCurrent() + kCFAbsoluteTimeIntervalSince1970;
+    now                *= 1000; // convert sec > ms
+    xhl_unixtime_init  = now;
 }
 
 uint64_t xtime_now_ns()
@@ -86,8 +92,9 @@ uint64_t xtime_now_ns()
 
 #endif // __APPLE__
 
-double xtime_convert_ns_to_ms(uint64_t ns) { return (double)ns / 1.e6; }
-double xtime_convert_ns_to_sec(uint64_t ns) { return (double)ns / 1.e9; }
+double   xtime_convert_ns_to_ms(uint64_t ns) { return (double)ns / 1.e6; }
+double   xtime_convert_ns_to_sec(uint64_t ns) { return (double)ns / 1.e9; }
+uint64_t xtime_unix_ms() { return xhl_unixtime_init + xtime_now_ns() / 1000000; }
 
 #ifndef NDEBUG
 #include <stdio.h>
