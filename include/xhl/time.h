@@ -10,6 +10,7 @@ void     xtime_init();
 uint64_t xtime_now_ns();
 double   xtime_convert_ns_to_ms(uint64_t ns);
 double   xtime_convert_ns_to_sec(uint64_t ns);
+uint64_t xtime_unix_ms();
 
 #ifndef NDEBUG
 // Quick an dirty performance timer that won't show up in release. Should be thread safe.
@@ -29,15 +30,23 @@ void xtime_stopwatch_log_ms(const char* msg_prefix); // Resets stopwatch
 #undef XHL_TIME_IMPL
 
 #ifdef _WIN32
-#include <winnt.h>
+#include <Windows.h>
 
 LARGE_INTEGER xhl_perffreq;
 LARGE_INTEGER xhl_timestart;
+uint64_t      xhl_unixtime_init;
 
 void xtime_init()
 {
     QueryPerformanceFrequency(&xhl_perffreq);
     QueryPerformanceCounter(&xhl_timestart);
+
+    // https://stackoverflow.com/questions/1695288/getting-the-current-time-in-milliseconds-from-the-system-clock-in-windows#1695332
+    FILETIME filetime;
+    GetSystemTimeAsFileTime(&filetime);
+    xhl_unixtime_init  = (uint64_t)filetime.dwLowDateTime + ((uint64_t)(filetime.dwHighDateTime) << 32LL);
+    xhl_unixtime_init /= 10000;             // convert units 100 nanosecods > ms
+    xhl_unixtime_init -= 11644473600000ULL; // convert date from Jan 1, 1601 to Jan 1 1970.
 }
 
 uint64_t xtime_now_ns()
@@ -47,10 +56,12 @@ uint64_t xtime_now_ns()
     LARGE_INTEGER now;
     QueryPerformanceCounter(&now);
     now.QuadPart -= xhl_timestart.QuadPart;
-    INT64 q      = now.QuadPart / xhl_perffreq.QuadPart;
-    INT64 r      = now.QuadPart % xhl_perffreq.QuadPart;
+    INT64 q       = now.QuadPart / xhl_perffreq.QuadPart;
+    INT64 r       = now.QuadPart % xhl_perffreq.QuadPart;
     return q * 1000000000 + r * 1000000000 / xhl_perffreq.QuadPart;
 }
+
+uint64_t xtime_unix_ms() { return xhl_unixtime_init + xtime_now_ns() / 1000000; }
 
 #elif defined(__APPLE__) // endif _WIN32
 #include <mach/mach_time.h>
@@ -75,21 +86,18 @@ uint64_t xtime_now_ns()
 
 #endif // __APPLE__
 
-
 double xtime_convert_ns_to_ms(uint64_t ns) { return (double)ns / 1.e6; }
 double xtime_convert_ns_to_sec(uint64_t ns) { return (double)ns / 1.e9; }
 
 #ifndef NDEBUG
 #include <stdio.h>
 static _Thread_local uint64_t g_xhl_stopwatch = 0;
-void xtime_stopwatch_start()
-{
-    g_xhl_stopwatch = xtime_now_ns();
-}
+
+void xtime_stopwatch_start() { g_xhl_stopwatch = xtime_now_ns(); }
 void xtime_stopwatch_log_ms(const char* msg_prefix)
 {
-    uint64_t now = xtime_now_ns();
-    double ms = xtime_convert_ns_to_ms(now - g_xhl_stopwatch);
+    uint64_t now    = xtime_now_ns();
+    double   ms     = xtime_convert_ns_to_ms(now - g_xhl_stopwatch);
     g_xhl_stopwatch = now;
     fprintf(stderr, "%s: %.2fms\n", msg_prefix, ms);
 }
