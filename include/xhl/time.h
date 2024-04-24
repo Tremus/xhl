@@ -61,8 +61,6 @@ uint64_t xtime_now_ns()
     return q * 1000000000 + r * 1000000000 / xhl_perffreq.QuadPart;
 }
 
-uint64_t xtime_unix_ms() { return xhl_unixtime_init + xtime_now_ns() / 1000000; }
-
 #elif defined(__APPLE__) // endif _WIN32
 #include <CoreFoundation/CoreFoundation.h>
 #include <mach/mach_time.h>
@@ -76,9 +74,9 @@ void xtime_init()
     xhl_start_machtime = mach_absolute_time();
     mach_timebase_info(&xhl_timebase);
 
-    CFAbsoluteTime now = CFAbsoluteTimeGetCurrent() + kCFAbsoluteTimeIntervalSince1970;
+    CFAbsoluteTime now  = CFAbsoluteTimeGetCurrent() + kCFAbsoluteTimeIntervalSince1970;
     now                *= 1000; // convert sec > ms
-    xhl_unixtime_init  = now;
+    xhl_unixtime_init   = now;
 }
 
 uint64_t xtime_now_ns()
