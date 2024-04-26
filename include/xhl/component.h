@@ -663,10 +663,10 @@ void xcomp_send_mouse_down(xcomp_root* root, xcomp_event_data info)
         // handle left button
         if ((info.modifiers & XCOMP_MOD_LEFT_BUTTON) && root->mouse_left_down == NULL)
         {
-            root->mouse_left_down  = comp;
-            root->mouse_down_pos.x = info.x;
-            root->mouse_down_pos.y = info.y;
-            comp->flags           |= XCOMP_FLAG_IS_MOUSE_LEFT_DOWN;
+            root->mouse_left_down   = comp;
+            root->mouse_down_pos.x  = info.x;
+            root->mouse_down_pos.y  = info.y;
+            comp->flags            |= XCOMP_FLAG_IS_MOUSE_LEFT_DOWN;
 
             comp->event_handler(comp, XCOMP_EVENT_MOUSE_LEFT_DOWN, info);
         }
@@ -806,7 +806,6 @@ void xcomp_root_clear(xcomp_root* root)
     xcomp_component* last_mouse_right_down  = root->mouse_right_down;
     xcomp_component* last_mouse_middle_down = root->mouse_middle_down;
     xcomp_component* last_mouse_drag_over   = root->mouse_drag_over;
-    xcomp_component* last_keyboard_focus    = root->keyboard_focus;
     xcomp_event_data edata                  = {.x = root->position.x, .y = root->position.y, .modifiers = 0};
 
     root->mouse_over            = NULL;
