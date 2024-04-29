@@ -54,8 +54,8 @@ void xalloc_init()
 void xalloc_shutdown()
 {
 #ifndef NDEBUG
-    xassert(g_num_xmallocs == 0);
-    xassert(g_num_xvallocs == 0);
+    xalloc_assert(g_num_xmallocs == 0);
+    xalloc_assert(g_num_xvallocs == 0);
 #endif
 }
 
