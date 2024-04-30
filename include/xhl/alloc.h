@@ -107,8 +107,12 @@ void xfree(void* ptr)
 #define XHL_MEM_RESERVE    0x00002000
 #define XHL_PAGE_READWRITE 0x04
 
-void* __stdcall VirtualAlloc(void* lpAddress, size_t dwSize, unsigned long flAllocationType, unsigned long flProtect);
-int __stdcall VirtualFree(void* address, size_t size, unsigned long free_type);
+__declspec(dllimport) void* __stdcall VirtualAlloc(
+    void*         lpAddress,
+    size_t        dwSize,
+    unsigned long flAllocationType,
+    unsigned long flProtect);
+__declspec(dllimport) int __stdcall VirtualFree(void* address, size_t size, unsigned long free_type);
 
 void* xvalloc(void* hint, uint64_t size)
 {
