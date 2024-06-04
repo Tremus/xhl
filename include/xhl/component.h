@@ -250,7 +250,7 @@ static inline bool xcomp_is_enabled(xcomp_component*);
 // If you keep a pointer to your whole applicaton on your root component, then
 // this is a useful way to retrieve it inside event callbacks from any child in
 // your hierarchy
-xcomp_component* xcomp_get_root_component(xcomp_component* comp);
+const xcomp_component* xcomp_get_root_component(const xcomp_component* comp);
 
 // recursively loops though children until it finds the bottom level
 // component with the given coordinates
@@ -492,9 +492,9 @@ void xcomp_set_enabled(xcomp_component* comp, bool enabled)
     }
 }
 
-xcomp_component* xcomp_get_root_component(xcomp_component* comp)
+const xcomp_component* xcomp_get_root_component(const xcomp_component* comp)
 {
-    xcomp_component* c = comp;
+    const xcomp_component* c = comp;
 
     while (c->parent != NULL)
         c = c->parent;
