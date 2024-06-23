@@ -25,7 +25,7 @@
  * MacOS: Requires Objective-C/Objective-C++ for some functions
  *
  * LINKING:
- * Windows: Kernel32 Shlwapi
+ * Windows: Kernel32 Shell32 Shlwapi
  * macOS: -framework AppKit
  */
 #ifndef XHL_FILES_H
@@ -60,12 +60,12 @@ bool xfiles_create_directory(const char* path);
 // Creates directory and any required parent directories, then returns true if the exists or was craeted.
 bool xfiles_create_directory_recursive(const char* path);
 
-// Returns only true on success and sets 'outbuffer' and 'outbufferlen' with file contents and size
-// Must release 'outbuffer' with free()
-bool xfiles_read(const char* path, void** outbuffer, size_t* outbufferlen);
+// Returns only true on success and sets 'out' and 'outlen' with file contents and size
+// Must release 'out' with free()
+bool xfiles_read(const char* path, void** out, size_t* outlen);
 // Creates file if it doesn't exist with default access permissions.
 // If file already exists, it overwrites all contents.
-bool xfiles_write(const char* path, const void* buffer, size_t bufferlen);
+bool xfiles_write(const char* path, const void* in, size_t inlen);
 
 // Moves the file to:
 // Win: Recycle Bin /
@@ -77,6 +77,25 @@ bool xfiles_delete_permanently(const char* path);
 // Win: File Explorer /
 // OSX: Finder
 bool xfiles_open_file_explorer(const char* path);
+
+enum XFILES_USER_DIRECTORY
+{
+    // Windows: {letter}:\\Users\\{username}
+    // macOS: /Users/{username}
+    XFILES_USER_DIRECTORY_HOME,
+    // Windows: [HOME]\\AppData\Roaming
+    // macOS: [HOME]/Library/Application\ Support
+    XFILES_USER_DIRECTORY_APPDATA,
+    XFILES_USER_DIRECTORY_DESKTOP,
+    XFILES_USER_DIRECTORY_DOCUMENTS,
+    XFILES_USER_DIRECTORY_DOWNLOADS,
+    XFILES_USER_DIRECTORY_MUSIC,
+    XFILES_USER_DIRECTORY_PICTURES,
+    XFILES_USER_DIRECTORY_VIDEOS,
+    XFILES_USER_DIRECTORY_COUNT,
+};
+
+bool xfiles_get_user_directory(char* out, size_t outlen, enum XFILES_USER_DIRECTORY loc);
 
 #ifdef __cplusplus
 }
@@ -92,6 +111,8 @@ bool xfiles_open_file_explorer(const char* path);
 
 #ifdef _WIN32
 #include <Windows.h>
+
+#include <Shlobj.h>
 #include <shlwapi.h>
 
 bool xfiles_exists(const char* path)
@@ -114,7 +135,7 @@ bool xfiles_create_directory(const char* path)
     return false;
 }
 
-bool xfiles_read(const char* path, void** outbuffer, size_t* outbufferlen)
+bool xfiles_read(const char* path, void** out, size_t* outlen)
 {
     // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew
     // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getfilesizeex
@@ -164,7 +185,7 @@ bool xfiles_read(const char* path, void** outbuffer, size_t* outbufferlen)
     return ok;
 }
 
-bool xfiles_write(const char* path, const void* buffer, size_t bufferlen)
+bool xfiles_write(const char* path, const void* in, size_t inlen)
 {
     // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-writefile
 
@@ -187,7 +208,7 @@ bool xfiles_write(const char* path, const void* buffer, size_t bufferlen)
         XFILES_ASSERT(hFile != INVALID_HANDLE_VALUE);
         if (hFile != INVALID_HANDLE_VALUE)
         {
-            ok = WriteFile(hFile, data, datalen, &nBytesWritten, NULL);
+            ok = WriteFile(hFile, in, inlen, &nBytesWritten, NULL);
             XFILES_ASSERT(ok);
             CloseHandle(hFile);
         }
@@ -224,7 +245,7 @@ bool xfiles_exists(const char* path) { return access(path, F_OK) == 0; }
 // https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/mkdir.2.html
 bool xfiles_create_directory(const char* path) { return mkdir(path, 0777) == 0; }
 
-bool xfiles_read(const char* path, void** outbuffer, size_t* outbufferlen)
+bool xfiles_read(const char* path, void** out, size_t* outlen)
 {
     // https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/open.2.html
     // https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/fstat.2.html
@@ -253,8 +274,8 @@ bool xfiles_read(const char* path, void** outbuffer, size_t* outbufferlen)
             }
             else
             {
-                *outbuffer    = data;
-                *outbufferlen = info.st_size;
+                *out    = data;
+                *outlen = info.st_size;
             }
         }
         close(fd);
@@ -263,7 +284,7 @@ bool xfiles_read(const char* path, void** outbuffer, size_t* outbufferlen)
     return readBytes != -1;
 }
 
-bool xfiles_write(const char* path, const void* buffer, size_t bufferlen)
+bool xfiles_write(const char* path, const void* in, size_t inlen)
 {
     // https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/write.2.html#//apple_ref/doc/man/2/write
     int     fd;
@@ -272,7 +293,7 @@ bool xfiles_write(const char* path, const void* buffer, size_t bufferlen)
     fd = open(path, O_WRONLY | O_CREAT, 0777);
     if (fd != -1)
     {
-        nwritten = write(fd, buffer, bufferlen);
+        nwritten = write(fd, in, inlen);
         close(fd);
     }
     return nwritten != -1;
@@ -311,6 +332,47 @@ bool xfiles_open_file_explorer(const char* path)
     BOOL ok = [[NSWorkspace sharedWorkspace] openFile:@(path) withApplication:@"Finder"];
     return ok;
 }
+
+bool xfiles_get_user_directory(char* out, size_t outlen, enum XFILES_USER_DIRECTORY loc)
+{
+    static const char* PATHS[] = {
+        "",                             // XFILES_USER_DIRECTORY_HOME,
+        "/Library/Application Support", // XFILES_USER_DIRECTORY_APPDATA
+        "/Desktop",                     // XFILES_USER_DIRECTORY_DESKTOP
+        "/Documents",                   // XFILES_USER_DIRECTORY_DOCUMENTS
+        "/Downloads",                   // XFILES_USER_DIRECTORY_DOWNLOADS
+        "/Music",                       // XFILES_USER_DIRECTORY_MUSIC
+        "/Pictures",                    // XFILES_USER_DIRECTORY_PICTURES
+        "/Movies",                      // XFILES_USER_DIRECTORY_VIDEOS
+    };
+    _Static_assert(XFILES_ARRLEN(PATHS) == XFILES_USER_DIRECTORY_COUNT);
+
+    // I don't think calling this function touches with the reference count, but then I haven't looked at the binary
+    // https://developer.apple.com/documentation/foundation/1413045-nshomedirectory
+    NSString*   nsstr   = NSHomeDirectory();
+    const char* homebuf = [nsstr UTF8String];
+    size_t      homelen = strlen(out);
+    const char* subdir;
+    size_t      subdirlen;
+
+    if (loc < 0)
+        loc = 0;
+    if (loc >= XFILES_USER_DIRECTORY_COUNT)
+        loc = XFILES_USER_DIRECTORY_COUNT - 1;
+
+    subdir    = PATHS[loc];
+    subdirlen = strlen(subdir);
+
+    if ((homelen + subdirlen + 1) > outlen)
+        return false;
+
+    memcpy(out, homebuf, homelen);
+    memcpy(out + homelen, subdir, subdirlen);
+    out[homelen + subdirlen] = '\0';
+
+    return true;
+}
+
 #endif // __OBJC__
 #endif // __APPLE__
 
