@@ -103,20 +103,11 @@ void xfree(void* ptr)
 }
 
 #ifdef _WIN32
-#define XHL_MEM_COMMIT     0x00001000
-#define XHL_MEM_RESERVE    0x00002000
-#define XHL_PAGE_READWRITE 0x04
-
-__declspec(dllimport) void* __stdcall VirtualAlloc(
-    void*         lpAddress,
-    size_t        dwSize,
-    unsigned long flAllocationType,
-    unsigned long flProtect);
-__declspec(dllimport) int __stdcall VirtualFree(void* address, size_t size, unsigned long free_type);
+#include <Windows.h>
 
 void* xvalloc(void* hint, uint64_t size)
 {
-    void* ptr = VirtualAlloc(hint, size, XHL_MEM_COMMIT | XHL_MEM_RESERVE, XHL_PAGE_READWRITE);
+    void* ptr = VirtualAlloc(hint, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     xalloc_assert(ptr != NULL);
 #ifndef NDEBUG
     g_num_xvallocs++;
