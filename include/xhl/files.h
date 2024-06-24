@@ -84,9 +84,9 @@ bool xfiles_write(const char* path, const void* in, size_t inlen);
 // Moves the file to:
 // Win: Recycle Bin /
 // OSX: Trash
-bool xfiles_delete_safely(const char* path);
+bool xfiles_trash(const char* path);
 // No bins. File is deleted and is likely unrecoverable
-bool xfiles_delete_permanently(const char* path);
+bool xfiles_delete(const char* path);
 // Opens OS file browsing app with path selected
 // Win: File Explorer /
 // OSX: Finder
@@ -232,7 +232,7 @@ bool xfiles_write(const char* path, const void* in, size_t inlen)
     return ok;
 }
 
-bool xfiles_delete_safely(const char* path)
+bool xfiles_trash(const char* path)
 {
     // https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shfileoperationw
     // https://learn.microsoft.com/en-us/windows/win32/api/shellapi/ns-shellapi-shfileopstructw
@@ -252,7 +252,7 @@ bool xfiles_delete_safely(const char* path)
     return false;
 }
 
-bool xfiles_delete_permanently(const char* path)
+bool xfiles_delete(const char* path)
 {
     // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-deletefilew
     WCHAR FilePath[MAX_PATH];
@@ -375,12 +375,12 @@ bool xfiles_write(const char* path, const void* in, size_t inlen)
 }
 
 // https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/unlink.2.html
-bool xfiles_delete_permanently(const char* path) { return unlink(path) == 0; }
+bool xfiles_delete(const char* path) { return unlink(path) == 0; }
 
 #ifdef __OBJC__
 #import <AppKit/NSWorkspace.h>
 
-bool xfiles_delete_safely(const char* path)
+bool xfiles_trash(const char* path)
 {
     NSString* str     = [[NSString alloc] initWithString:@(path)];
     NSURL*    itemUrl = [[NSURL fileURLWithPath:str isDirectory:FALSE] retain];

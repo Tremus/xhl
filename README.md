@@ -9,6 +9,22 @@ Stands for:
 
 [STB-Style](https://github.com/nothings/stb/blob/master/docs/stb_howto.txt) headers
 
+### [alloc.h](include/xhl/alloc.h)
+
+Wraps `malloc`, calling `exit(ENOMEM)` if `NULL` is returned. Additionally tracks number of `xmalloc` calls in `DEBUG` to help spot memory leaks.
+
+```c
+#include <xhl/alloc.h>
+int main() {
+    // will exit with ENOMEM
+    int* nums = xmalloc(1LLU << 63);
+    // unreachable
+    nums = xrealloc(nums, 2);
+    xfree(nums);
+    return 0;
+}
+```
+
 ### [array.h](include/xhl/array.h)
 
 Dynamic array, type agnostic. Based on [stb_ds.h](https://github.com/nothings/stb/blob/master/stb_ds.h) by Sean Barrett.
@@ -79,18 +95,27 @@ Simple macros for pausing your debugger.
 xassert(2 + 2 == 5); // pause
 ```
 
-### [alloc.h](include/xhl/alloc.h)
+### [files.h](include/xhl/files.h)
 
-Wraps `malloc`, calling `exit(ENOMEM)` if `NULL` is returned. Additionally tracks number of `xmalloc` calls in `DEBUG` to help spot memory leaks.
+Imperitive file reading & writing. Paths are expected to be UTF8. Handles platform specific conversions
 
 ```c
-#include <xhl/alloc.h>
-int main() {
-    // will exit with ENOMEM
-    int* nums = xmalloc(1U << 63);
-    // unreachable
-    nums = xrealloc(nums, 2);
-    xfree(nums);
-    return 0;
-}
+// Build file path (no allocs!)
+char path[1024];
+static const char* filename = XFILES_DIR_STR "file.txt"; // Win \\file.txt, Posix /file.txt
+xfiles_get_user_directory(path, sizeof(path), XFILES_USER_DIRECTORY_DESKTOP);
+strncat(path, filename, sizeof(path) - strlen(path) - 1);
+// Write
+assert(!xfiles_exists(path));
+static const char* writebuf  = "Hello World!";
+xfiles_write(path, writebuf, 1 + strlen(writebuf));
+assert(xfiles_exists(path));
+// Read (allocates memory!)
+char*  readbuf    = NULL;
+size_t readbuflen = 0;
+xfiles_read(path, (void**)&readbuf, &readbuflen);
+printf("Contents: %.*s\n", (int)(readbuflen), readbuf);
+free(readbuf);
+// Move to OS bin / trash
+xfiles_trash(path);
 ```

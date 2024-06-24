@@ -93,7 +93,7 @@ int main()
                     xfree(content);
 
                     printf("Moving to bin: %s\n", path);
-                    ok = xfiles_delete_safely(path);
+                    ok = xfiles_trash(path);
                     xassert(ok);
                     xassert(! xfiles_exists(path));
                 }
