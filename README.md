@@ -108,7 +108,7 @@ strncat(path, filename, sizeof(path) - strlen(path) - 1);
 // Write
 assert(!xfiles_exists(path));
 static const char* writebuf  = "Hello World!";
-xfiles_write(path, writebuf, 1 + strlen(writebuf));
+xfiles_write(path, writebuf, strlen(writebuf));
 assert(xfiles_exists(path));
 // Read (allocates memory!)
 char*  readbuf    = NULL;

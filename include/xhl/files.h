@@ -80,6 +80,9 @@ bool xfiles_read(const char* path, void** out, size_t* outlen);
 // Creates file if it doesn't exist with default access permissions.
 // If file already exists, it overwrites all contents.
 bool xfiles_write(const char* path, const void* in, size_t inlen);
+// Creates file if it doesn't exist with default access permissions.
+// Writes data starting from the end of a file, leaving old contents intact
+bool xfiles_append(const char* path, const char* in, size_t inlen);
 
 // Moves the file to:
 // Win: Recycle Bin /
@@ -232,6 +235,31 @@ bool xfiles_write(const char* path, const void* in, size_t inlen)
             CREATE_ALWAYS,
             FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN,
             NULL);
+        XFILES_ASSERT(hFile != INVALID_HANDLE_VALUE);
+        if (hFile != INVALID_HANDLE_VALUE)
+        {
+            ok = WriteFile(hFile, in, inlen, &nBytesWritten, NULL);
+            XFILES_ASSERT(ok);
+            ok = ok && CloseHandle(hFile);
+            XFILES_ASSERT(ok);
+        }
+    }
+
+    return ok;
+}
+
+bool xfiles_append(const char* path, const char* in, size_t inlen)
+{
+    WCHAR  FilePath[MAX_PATH];
+    HANDLE hFile         = NULL;
+    BOOL   ok            = FALSE;
+    DWORD  nBytesWritten = 0;
+    int    num = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, FilePath, XFILES_ARRLEN(FilePath));
+    XFILES_ASSERT(num);
+    if (num)
+    {
+        hFile =
+            CreateFileW(FilePath, FILE_APPEND_DATA, FILE_SHARE_READ, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
         XFILES_ASSERT(hFile != INVALID_HANDLE_VALUE);
         if (hFile != INVALID_HANDLE_VALUE)
         {
