@@ -268,6 +268,7 @@ bool xfiles_open_file_explorer(const char* path)
     if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, FilePath, XFILES_ARRLEN(FilePath)))
     {
         INT_PTR ret = (INT_PTR)ShellExecuteW(NULL, L"open", FilePath, NULL, NULL, SW_SHOWDEFAULT);
+        XFILES_ASSERT(ret > 32);
         return ret > 32;
     }
     return false;
@@ -456,7 +457,7 @@ const char* xfiles_get_name(const char* path)
     for (const char* c = path; *c != '\0'; c++)
         if (*c == XFILES_DIR_CHAR)
             name = c + 1;
-    return name != path ? NULL : name;
+    return name == path ? NULL : name;
 }
 
 const char* xfiles_get_extension(const char* name)
@@ -465,7 +466,7 @@ const char* xfiles_get_extension(const char* name)
     for (const char* c = name; *c != '\0'; c++)
         if (*c == '.')
             extension = c;
-    return extension != name ? NULL : extension;
+    return extension == name ? NULL : extension;
 }
 
 bool xfiles_create_directory_recursive(const char* path)
