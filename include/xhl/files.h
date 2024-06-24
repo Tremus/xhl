@@ -136,7 +136,9 @@ bool xfiles_exists(const char* path)
     // https://learn.microsoft.com/en-us/windows/win32/api/stringapiset/nf-stringapiset-multibytetowidechar
 
     WCHAR pathunicode[MAX_PATH];
-    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, pathunicode, XFILES_ARRLEN(pathunicode)))
+    int   num = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, pathunicode, XFILES_ARRLEN(pathunicode));
+    XFILES_ASSERT(num);
+    if (num)
         return PathFileExistsW(pathunicode);
     return false;
 }
@@ -145,8 +147,14 @@ bool xfiles_create_directory(const char* path)
 {
     // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createdirectoryw
     WCHAR DirPath[MAX_PATH];
-    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, DirPath, XFILES_ARRLEN(DirPath)))
-        return CreateDirectoryW(DirPath, 0);
+    int   num = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, DirPath, XFILES_ARRLEN(DirPath));
+    XFILES_ASSERT(num);
+    if (num)
+    {
+        BOOL ok = CreateDirectoryW(DirPath, 0);
+        XFILES_ASSERT(ok);
+        return ok;
+    }
     return false;
 }
 
@@ -162,7 +170,9 @@ bool xfiles_read(const char* path, void** out, size_t* outlen)
     BOOL          ok       = FALSE;
 
     WCHAR FileName[MAX_PATH];
-    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, FileName, XFILES_ARRLEN(FileName)))
+    int   num = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, FileName, XFILES_ARRLEN(FileName));
+    XFILES_ASSERT(num);
+    if (num)
     {
         hFile = CreateFileW(
             FileName,
@@ -172,15 +182,16 @@ bool xfiles_read(const char* path, void** out, size_t* outlen)
             OPEN_EXISTING,
             FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN,
             NULL);
-
+        XFILES_ASSERT(hFile != INVALID_HANDLE_VALUE);
         if (hFile != INVALID_HANDLE_VALUE)
         {
             ok = GetFileSizeEx(hFile, &FileSize);
+            XFILES_ASSERT(ok);
             if (ok)
             {
                 data = XFILES_MALLOC(FileSize.QuadPart);
                 ok   = ReadFile(hFile, data, FileSize.QuadPart, NULL, NULL);
-
+                XFILES_ASSERT(ok);
                 if (ok)
                 {
                     *out    = data;
@@ -193,7 +204,8 @@ bool xfiles_read(const char* path, void** out, size_t* outlen)
                     FileSize.QuadPart = 0;
                 }
             }
-            CloseHandle(hFile);
+            ok = ok && CloseHandle(hFile);
+            XFILES_ASSERT(ok);
         }
     }
 
@@ -208,8 +220,9 @@ bool xfiles_write(const char* path, const void* in, size_t inlen)
     HANDLE hFile         = NULL;
     BOOL   ok            = FALSE;
     DWORD  nBytesWritten = 0;
-
-    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, FilePath, XFILES_ARRLEN(FilePath)))
+    int    num = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, FilePath, XFILES_ARRLEN(FilePath));
+    XFILES_ASSERT(num);
+    if (num)
     {
         hFile = CreateFileW(
             FilePath,
@@ -219,13 +232,13 @@ bool xfiles_write(const char* path, const void* in, size_t inlen)
             CREATE_ALWAYS,
             FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN,
             NULL);
-
         XFILES_ASSERT(hFile != INVALID_HANDLE_VALUE);
         if (hFile != INVALID_HANDLE_VALUE)
         {
             ok = WriteFile(hFile, in, inlen, &nBytesWritten, NULL);
             XFILES_ASSERT(ok);
-            CloseHandle(hFile);
+            ok = ok && CloseHandle(hFile);
+            XFILES_ASSERT(ok);
         }
     }
 
@@ -238,7 +251,9 @@ bool xfiles_trash(const char* path)
     // https://learn.microsoft.com/en-us/windows/win32/api/shellapi/ns-shellapi-shfileopstructw
     WCHAR PathList[MAX_PATH + 8] = {0};
 
-    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, PathList, XFILES_ARRLEN(PathList)))
+    int num = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, PathList, XFILES_ARRLEN(PathList));
+    XFILES_ASSERT(num);
+    if (num)
     {
         SHFILEOPSTRUCTW FileOp = {0};
 
@@ -247,7 +262,9 @@ bool xfiles_trash(const char* path)
                         FOF_RENAMEONCOLLISION | FOF_SILENT;
         FileOp.pFrom = PathList;
 
-        return 0 == SHFileOperationW(&FileOp);
+        int ret = SHFileOperationW(&FileOp);
+        XFILES_ASSERT(ret == 0);
+        return ret == 0;
     }
     return false;
 }
@@ -256,8 +273,14 @@ bool xfiles_delete(const char* path)
 {
     // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-deletefilew
     WCHAR FilePath[MAX_PATH];
-    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, FilePath, XFILES_ARRLEN(FilePath)))
-        return DeleteFileW(FilePath);
+    int   num = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, FilePath, XFILES_ARRLEN(FilePath));
+    XFILES_ASSERT(num);
+    if (num)
+    {
+        BOOL ok = DeleteFileW(FilePath);
+        XFILES_ASSERT(ok);
+        return ok;
+    }
     return false;
 }
 
@@ -265,7 +288,9 @@ bool xfiles_open_file_explorer(const char* path)
 {
     // https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shellexecutew
     WCHAR FilePath[MAX_PATH];
-    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, FilePath, XFILES_ARRLEN(FilePath)))
+    int   num = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, FilePath, XFILES_ARRLEN(FilePath));
+    XFILES_ASSERT(num);
+    if (num)
     {
         INT_PTR ret = (INT_PTR)ShellExecuteW(NULL, L"open", FilePath, NULL, NULL, SW_SHOWDEFAULT);
         XFILES_ASSERT(ret > 32);
