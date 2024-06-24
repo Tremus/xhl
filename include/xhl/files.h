@@ -44,6 +44,20 @@
 
 #define XFILES_ARRLEN(arr) (sizeof(arr) / sizeof(arr[0]))
 
+#ifndef XFILES_ASSERT
+#ifdef NDEBUG
+// clang-format off
+#define XFILES_ASSERT(cond) do { (void)(cond); } while (0)
+// clang-format on
+#else
+#ifdef _WIN32
+#define XFILES_ASSERT(cond) (cond) ? (void)0 : __debugbreak()
+#else // #if __APPLE__
+#define XFILES_ASSERT(cond) (cond) ? (void)0 : __builtin_debugtrap()
+#endif // _WIN32
+#endif // NDEBUG
+#endif // XFILES_ASSERT
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -113,7 +127,8 @@ bool xfiles_get_user_directory(char* out, size_t outlen, enum XFILES_USER_DIRECT
 #include <Windows.h>
 
 #include <Shlobj.h>
-#include <shlwapi.h>
+#include <Shlwapi.h>
+#include <shellapi.h>
 
 bool xfiles_exists(const char* path)
 {
@@ -141,7 +156,7 @@ bool xfiles_read(const char* path, void** out, size_t* outlen)
     // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getfilesizeex
     // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-readfile
 
-    UINT8*        data     = NULL;
+    void*         data     = NULL;
     HANDLE        hFile    = NULL;
     LARGE_INTEGER FileSize = {0};
     BOOL          ok       = FALSE;
@@ -168,8 +183,8 @@ bool xfiles_read(const char* path, void** out, size_t* outlen)
 
                 if (ok)
                 {
-                    *outdata    = data;
-                    *outdatalen = FileSize.QuadPart;
+                    *out    = data;
+                    *outlen = FileSize.QuadPart;
                 }
                 else
                 {
@@ -217,28 +232,87 @@ bool xfiles_write(const char* path, const void* in, size_t inlen)
     return ok;
 }
 
-// TODO
-bool xfiles_delete_safely(const char* path);
-bool xfiles_delete_permanently(const char* path);
-bool xfiles_open_file_explorer(const char* path);
+bool xfiles_delete_safely(const char* path)
+{
+    // https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shfileoperationw
+    // https://learn.microsoft.com/en-us/windows/win32/api/shellapi/ns-shellapi-shfileopstructw
+    WCHAR PathList[MAX_PATH + 8] = {0};
 
+    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, PathList, XFILES_ARRLEN(PathList)))
+    {
+        SHFILEOPSTRUCTW FileOp = {0};
+
+        FileOp.wFunc  = FO_DELETE;
+        FileOp.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOCONFIRMMKDIR | FOF_NOERRORUI | FOF_NORECURSION |
+                        FOF_RENAMEONCOLLISION | FOF_SILENT;
+        FileOp.pFrom = PathList;
+
+        return 0 == SHFileOperationW(&FileOp);
+    }
+    return false;
+}
+
+bool xfiles_delete_permanently(const char* path)
+{
+    // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-deletefilew
+    WCHAR FilePath[MAX_PATH];
+    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, FilePath, XFILES_ARRLEN(FilePath)))
+        return DeleteFileW(FilePath);
+    return false;
+}
+
+bool xfiles_open_file_explorer(const char* path)
+{
+    // https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shellexecutew
+    WCHAR FilePath[MAX_PATH];
+    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, FilePath, XFILES_ARRLEN(FilePath)))
+    {
+        INT_PTR ret = (INT_PTR)ShellExecuteW(NULL, L"open", FilePath, NULL, NULL, SW_SHOWDEFAULT);
+        return ret > 32;
+    }
+    return false;
+}
+
+bool xfiles_get_user_directory(char* out, size_t outlen, enum XFILES_USER_DIRECTORY loc)
+{
+    // https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-shgetknownfolderpath
+    // https://learn.microsoft.com/en-us/windows/win32/shell/knownfolderid
+
+    static const KNOWNFOLDERID* FOLDER_IDS[] = {
+        &FOLDERID_Profile,        // XFILES_USER_DIRECTORY_HOME
+        &FOLDERID_RoamingAppData, // XFILES_USER_DIRECTORY_APPDATA
+        &FOLDERID_Desktop,        // XFILES_USER_DIRECTORY_DESKTOP
+        &FOLDERID_Documents,      // XFILES_USER_DIRECTORY_DOCUMENTS
+        &FOLDERID_Downloads,      // XFILES_USER_DIRECTORY_DOWNLOADS
+        &FOLDERID_Music,          // XFILES_USER_DIRECTORY_MUSIC
+        &FOLDERID_Pictures,       // XFILES_USER_DIRECTORY_PICTURES
+        &FOLDERID_Videos,         // XFILES_USER_DIRECTORY_VIDEOS
+    };
+    _Static_assert(XFILES_ARRLEN(FOLDER_IDS) == XFILES_USER_DIRECTORY_COUNT, "");
+
+#ifdef __cplusplus
+#define XFILES_REF(ptr) *ptr
+#else
+#define XFILES_REF(ptr) ptr
 #endif
+
+    PWSTR Path = NULL;
+    if (loc < 0)
+        loc = (enum XFILES_USER_DIRECTORY)0;
+    if (loc >= XFILES_USER_DIRECTORY_COUNT)
+        loc = (enum XFILES_USER_DIRECTORY)(XFILES_USER_DIRECTORY_COUNT - 1);
+    if (S_OK == SHGetKnownFolderPath(XFILES_REF(FOLDER_IDS[loc]), 0, NULL, &Path))
+        return WideCharToMultiByte(CP_ACP, 0, Path, -1, out, outlen, NULL, NULL);
+
+    return false;
+}
+
+#endif // _WIN32
 
 #ifdef __APPLE__
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
-
-#ifndef XFILES_ASSERT
-#ifdef NDEBUG
-// clang-format off
-#define XFILES_ASSERT(cond) do { (void)(cond); } while (0)
-// clang-format on
-#else
-#include <assert.h>
-#define XFILES_ASSERT(cond) (cond) ? (void)0 : __builtin_debugtrap()
-#endif // NDEBUG
-#endif // XFILES_ASSERT
 
 // https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/access.2.html
 bool xfiles_exists(const char* path) { return access(path, F_OK) == 0; }
