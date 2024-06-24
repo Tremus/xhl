@@ -17,8 +17,8 @@ void* xrealloc(void*, size_t size);
 void* xcalloc(size_t num, size_t size);
 void  xfree(void*);
 
-void* xvalloc(void* hint, uint64_t size);
-void  xvfree(void* ptr, uint64_t size);
+void* xvalloc(void* hint, size_t size);
+void  xvfree(void* ptr, size_t size);
 
 #ifdef __cplusplus
 }
@@ -105,7 +105,7 @@ void xfree(void* ptr)
 #ifdef _WIN32
 #include <Windows.h>
 
-void* xvalloc(void* hint, uint64_t size)
+void* xvalloc(void* hint, size_t size)
 {
     void* ptr = VirtualAlloc(hint, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     xalloc_assert(ptr != NULL);
@@ -115,7 +115,7 @@ void* xvalloc(void* hint, uint64_t size)
     return ptr;
 }
 
-void xvfree(void* ptr, uint64_t size)
+void xvfree(void* ptr, size_t size)
 {
     xalloc_assert(ptr != NULL);
     VirtualFree(ptr, size, 0);
@@ -133,17 +133,17 @@ void xvfree(void* ptr, uint64_t size)
 #error Unknown unix
 #endif
 
-void* xvalloc(void* hint, uint64_t size)
+void* xvalloc(void* hint, size_t size)
 {
     void* ptr = mmap(hint, size, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
 #ifndef NDEBUG
-    xalloc_assert((uint64_t)ptr != 0xffffffffffffffff);
+    xalloc_assert((size_t)ptr != 0xffffffffffffffff);
     g_num_xvallocs++;
 #endif
     return ptr;
 }
 
-void xvfree(void* ptr, uint64_t size)
+void xvfree(void* ptr, size_t size)
 {
     xalloc_assert(ptr != NULL);
     munmap(ptr, size);
