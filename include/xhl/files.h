@@ -303,7 +303,11 @@ bool xfiles_get_user_directory(char* out, size_t outlen, enum XFILES_USER_DIRECT
     if (loc >= XFILES_USER_DIRECTORY_COUNT)
         loc = (enum XFILES_USER_DIRECTORY)(XFILES_USER_DIRECTORY_COUNT - 1);
     if (S_OK == SHGetKnownFolderPath(XFILES_REF(FOLDER_IDS[loc]), 0, NULL, &Path))
-        return WideCharToMultiByte(CP_ACP, 0, Path, -1, out, outlen, NULL, NULL);
+    {
+        int num = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, Path, -1, out, outlen, NULL, NULL);
+        XFILES_ASSERT(num);
+        return num != 0;
+    }
 
     return false;
 }
