@@ -422,10 +422,28 @@ bool xfiles_write(const char* path, const void* in, size_t inlen)
     int     fd;
     ssize_t nwritten = -1;
 
-    fd = open(path, O_WRONLY | O_CREAT, 0777);
+    fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0777);
+    XFILES_ASSERT(fd != -1);
     if (fd != -1)
     {
         nwritten = write(fd, in, inlen);
+        XFILES_ASSERT(nwritten != -1);
+        close(fd);
+    }
+    return nwritten != -1;
+}
+
+bool xfiles_append(const char* path, const char* in, size_t inlen)
+{
+    int     fd;
+    ssize_t nwritten = -1;
+
+    fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0777);
+    XFILES_ASSERT(fd != -1);
+    if (fd != -1)
+    {
+        nwritten = write(fd, in, inlen);
+        XFILES_ASSERT(nwritten != -1);
         close(fd);
     }
     return nwritten != -1;
