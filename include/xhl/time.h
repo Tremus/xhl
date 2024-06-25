@@ -95,7 +95,12 @@ double   xtime_convert_ns_to_sec(uint64_t ns) { return (double)ns / 1.e9; }
 uint64_t xtime_unix_ms() { return xhl_unixtime_init + xtime_now_ns() / 1000000; }
 
 #ifndef NDEBUG
+
+#ifndef XTIME_LOG
 #include <stdio.h>
+#define XTIME_LOG(...) fprintf(stderr, __VA_ARGS__)
+#endif // XTIME_LOG
+
 static _Thread_local uint64_t g_xhl_stopwatch = 0;
 
 void xtime_stopwatch_start() { g_xhl_stopwatch = xtime_now_ns(); }
@@ -104,8 +109,8 @@ void xtime_stopwatch_log_ms(const char* msg_prefix)
     uint64_t now    = xtime_now_ns();
     double   ms     = xtime_convert_ns_to_ms(now - g_xhl_stopwatch);
     g_xhl_stopwatch = now;
-    fprintf(stderr, "%s: %.2fms\n", msg_prefix, ms);
+    XTIME_LOG("%s: %.2fms\n", msg_prefix, ms);
 }
-#endif
+#endif // NDEBUG
 
 #endif // XHL_TIME_IMPL
