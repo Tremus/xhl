@@ -22,7 +22,7 @@
  *
  * BUILDING:
  * Simply #define XHL_FILES_IMPL in one of your build targets before including this header
- * MacOS: Requires Objective-C/Objective-C++ for some functions
+ * MacOS: Requires Objective-C/Objective-C++ for some functions. Supports both ARC and no ARC
  *
  * LINKING:
  * Windows: Kernel32 Shell32 Shlwapi
@@ -384,22 +384,24 @@ bool xfiles_read(const char* path, void** out, size_t* outlen)
     // https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/read.2.html
     // https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/close.2.html
 
-    int         fd        = -1;
-    int         ret       = -1;
-    struct stat info      = {0};
-    void*       data      = NULL;
-    ssize_t     readBytes = -1;
+    int         fd    = -1;
+    int         ret   = -1;
+    struct stat info  = {0};
+    void*       data  = NULL;
+    ssize_t     nread = -1;
 
     fd = open(path, O_RDONLY);
+    XFILES_ASSERT(fd != -1);
     if (fd != -1)
     {
         ret = fstat(fd, &info);
+        XFILES_ASSERT(ret != -1);
         if (ret != -1)
         {
-            data      = XFILES_MALLOC(info.st_size);
-            readBytes = read(fd, data, info.st_size);
-
-            if (readBytes == -1)
+            data  = XFILES_MALLOC(info.st_size);
+            nread = read(fd, data, info.st_size);
+            XFILES_ASSERT(nread != -1);
+            if (nread == -1)
             {
                 XFILES_FREE(data);
                 data = NULL;
@@ -413,7 +415,7 @@ bool xfiles_read(const char* path, void** out, size_t* outlen)
         close(fd);
     }
 
-    return readBytes != -1;
+    return nread != -1;
 }
 
 bool xfiles_write(const char* path, const void* in, size_t inlen)
@@ -457,8 +459,8 @@ bool xfiles_delete(const char* path) { return unlink(path) == 0; }
 
 bool xfiles_trash(const char* path)
 {
-    NSString* str     = [[NSString alloc] initWithString:@(path)];
-    NSURL*    itemUrl = [[NSURL fileURLWithPath:str isDirectory:FALSE] retain];
+    NSString* str     = [[NSString alloc] initWithUTF8String:path];
+    NSURL*    itemUrl = [NSURL fileURLWithPath:str isDirectory:FALSE];
 
     const NSFileManager* fm           = [NSFileManager defaultManager]; // strong
     NSURL*               resultingURL = NULL;
@@ -471,15 +473,18 @@ bool xfiles_trash(const char* path)
     // https://openradar.appspot.com/radar?id=5063396789583872
     ok = [fm trashItemAtURL:itemUrl resultingItemURL:&resultingURL error:&error];
 
+#if ! __has_feature(objc_arc)
     [fm release];
     [itemUrl release];
     [str release];
+#endif
     return ok;
 }
 
 bool xfiles_open_file_explorer(const char* path)
 {
     BOOL ok = [[NSWorkspace sharedWorkspace] openFile:@(path) withApplication:@"Finder"];
+    XFILES_ASSERT(ok);
     return ok;
 }
 
@@ -497,11 +502,11 @@ bool xfiles_get_user_directory(char* out, size_t outlen, enum XFILES_USER_DIRECT
     };
     _Static_assert(XFILES_ARRLEN(PATHS) == XFILES_USER_DIRECTORY_COUNT);
 
-    // I don't think calling this function touches with the reference count, but then I haven't looked at the binary
+    // I don't think calling this function touches the reference count, but then I haven't looked at the binary
     // https://developer.apple.com/documentation/foundation/1413045-nshomedirectory
     NSString*   nsstr   = NSHomeDirectory();
     const char* homebuf = [nsstr UTF8String];
-    size_t      homelen = strlen(out);
+    size_t      homelen = strlen(homebuf);
     const char* subdir;
     size_t      subdirlen;
 
@@ -513,6 +518,7 @@ bool xfiles_get_user_directory(char* out, size_t outlen, enum XFILES_USER_DIRECT
     subdir    = PATHS[loc];
     subdirlen = strlen(subdir);
 
+    XFILES_ASSERT((homelen + subdirlen + 1) <= outlen);
     if ((homelen + subdirlen + 1) > outlen)
         return false;
 
@@ -546,37 +552,36 @@ const char* xfiles_get_extension(const char* name)
 
 bool xfiles_create_directory_recursive(const char* path)
 {
-    if (! xfiles_exists(path))
-    {
-        char nextpath[1024];
-        int  i;
-        nextpath[0] = path[0];
+    if (xfiles_exists(path))
+        return true;
+
+    char nextpath[1024];
+    int  i;
+    nextpath[0] = path[0];
 #ifdef _WIN32
-        // eg: "C:\\Users\\username", start at "U"
-        nextpath[1] = path[1];
-        nextpath[2] = path[2];
-        i           = 3;
+    // eg: "C:\\Users\\username", start at "U"
+    nextpath[1] = path[1];
+    nextpath[2] = path[2];
+    i           = 3;
 #else
-        // eg "/Users/username", start at "U"
-        i = 1;
+    // eg "/Users/username", start at "U"
+    i = 1;
 #endif
-        for (; path[i] != '\0'; i++)
+    for (; path[i] != '\0'; i++)
+    {
+        nextpath[i] = path[i];
+        if (nextpath[i] == XFILES_DIR_CHAR)
         {
-            nextpath[i] = path[i];
-            if (nextpath[i] == XFILES_DIR_CHAR)
-            {
-                nextpath[i] = '\0';
-                if (! xfiles_exists(nextpath))
-                    xfiles_create_directory(nextpath);
-                XFILES_ASSERT(xfiles_exists(nextpath));
-                nextpath[i] = XFILES_DIR_CHAR;
-            }
+            nextpath[i] = '\0';
+            if (! xfiles_exists(nextpath))
+                xfiles_create_directory(nextpath);
+            XFILES_ASSERT(xfiles_exists(nextpath));
+            nextpath[i] = XFILES_DIR_CHAR;
         }
-        bool ok = xfiles_create_directory(path);
-        XFILES_ASSERT(ok);
-        return ok;
     }
-    return true;
+    bool ok = xfiles_create_directory(path);
+    XFILES_ASSERT(ok);
+    return ok;
 }
 
 #endif // XHL_FILES_IMPL
