@@ -44,6 +44,12 @@
 
 #define XFILES_ARRLEN(arr) (sizeof(arr) / sizeof(arr[0]))
 
+#if ! defined(XFILES_MALLOC) || ! defined(XFILES_FREE)
+#include <stdlib.h>
+#define XFILES_MALLOC(size) malloc(size)
+#define XFILES_FREE(ptr)    free(ptr)
+#endif
+
 #ifndef XFILES_ASSERT
 #ifdef NDEBUG
 // clang-format off
@@ -119,12 +125,6 @@ bool xfiles_get_user_directory(char* out, size_t outlen, enum XFILES_USER_DIRECT
 #endif
 
 #ifdef XHL_FILES_IMPL
-
-#if ! defined(XFILES_MALLOC) || ! defined(XFILES_FREE)
-#include <stdlib.h>
-#define XFILES_MALLOC(size) malloc(size)
-#define XFILES_FREE(ptr)    free(ptr)
-#endif
 
 #ifdef _WIN32
 #include <Windows.h>
