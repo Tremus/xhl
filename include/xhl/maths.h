@@ -3,17 +3,17 @@
 // Contains some functions from licensed libraries. See bottom of file
 #include <stdint.h>
 
-#define XM_Ef 2.718281828459045f
-#define XM_TAUf 6.283185307179586f
-#define XM_1_TAUf 0.15915494309189535f
-#define XM_PIf 3.141592653589793f
-#define XM_1_PIf 0.3183098861837907f
+#define XM_Ef       2.718281828459045f
+#define XM_TAUf     6.283185307179586f
+#define XM_1_TAUf   0.15915494309189535f
+#define XM_PIf      3.141592653589793f
+#define XM_1_PIf    0.3183098861837907f
 #define XM_HALF_PIf 1.5707963267948966f
-#define XM_LN2f 0.6931471805599453f
-#define XM_1_LN2f 1.4426950408889634f
-#define XM_LN10f 2.302585092994046f
-#define XM_1_LN10f 0.43429448190325176f
-#define XM_SQRT2f 1.41421356237309504880f
+#define XM_LN2f     0.6931471805599453f
+#define XM_1_LN2f   1.4426950408889634f
+#define XM_LN10f    2.302585092994046f
+#define XM_1_LN10f  0.43429448190325176f
+#define XM_SQRT2f   1.41421356237309504880f
 #define XM_SQRT1_2f 0.707106781186547524401f
 
 #ifdef __cplusplus
@@ -96,11 +96,8 @@ xm_complexf xm_ctanhf(float re, float im);
 // Find them here: https://github.com/Tremus/fastmaths
 
 float xm_fastsin(float x);
-float xm_fastsinfull(float x);
 float xm_fastcos(float x);
-float xm_fastcosfull(float x);
 float xm_fasttan(float x);
-float xm_fasttanfull(float x);
 
 float xm_fastersin(float x);
 float xm_fastersinfull(float x);
@@ -405,9 +402,6 @@ float xm_fastsin(float x)
 
 float xm_fastcos(float x) { return xm_fastsin(x + ((x > XM_HALF_PIf) ? (XM_HALF_PIf - XM_TAUf) : XM_HALF_PIf)); }
 float xm_fasttan(float x) { return xm_fastsin(x) / xm_fastsin(x + XM_HALF_PIf); }
-float xm_fastsinfull(float x) { return xm_fastsin(fmodf(x, XM_PIf)); }
-float xm_fastcosfull(float x) { return xm_fastcos(fmodf(x, XM_PIf)); }
-float xm_fasttanfull(float x) { return xm_fasttan(fmodf(x, XM_PIf)); }
 
 // Paul Minieros fastersin
 float xm_fastersin(float x)
