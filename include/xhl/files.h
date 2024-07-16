@@ -16,8 +16,8 @@
  *
  * LIMITATIONS:
  * Windows support file paths with names up to 32,767 wide characters. This library lazily supports a maximum of
- * MAX_PATH (260) wide characters using stack memory to avoid using malloc. If you need longer paths than this, you will
- * have to change this yourself!
+ * MAX_PATH (260) wide characters using stack memory to avoid using malloc or similar. If you need longer paths, you
+ * will have to add this yourself!
  * https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file#maximum-path-length-limitation
  *
  * BUILDING:
@@ -27,6 +27,10 @@
  * LINKING:
  * Windows: Kernel32 Shell32 Shlwapi
  * macOS: -framework AppKit
+ *
+ * CREDITS:
+ * Randy Gaul. 'xfiles_list' is a modified version of 'cf_scan' from the cute_files library
+ * https://github.com/RandyGaul/cute_headers_deprecated/blob/master/cute_files.h
  */
 #ifndef XHL_FILES_H
 #define XHL_FILES_H
@@ -44,7 +48,7 @@
 
 #define XFILES_ARRLEN(arr) (sizeof(arr) / sizeof(arr[0]))
 
-#if ! defined(XFILES_MALLOC) || ! defined(XFILES_FREE)
+#if !defined(XFILES_MALLOC) || !defined(XFILES_FREE)
 #include <stdlib.h>
 #define XFILES_MALLOC(size) malloc(size)
 #define XFILES_FREE(ptr)    free(ptr)
@@ -119,6 +123,20 @@ enum XFILES_USER_DIRECTORY
 };
 
 bool xfiles_get_user_directory(char* out, size_t outlen, enum XFILES_USER_DIRECTORY loc);
+
+typedef struct xfiles_list_item_t
+{
+    char path[1024];
+
+    uint32_t path_len;
+    uint32_t name_idx;
+    uint32_t ext_idx;
+    bool     is_dir;
+} xfiles_list_item_t;
+
+typedef void(xfiles_list_callback_t)(void* data, const xfiles_list_item_t* item);
+// Calls the above callback for each item in a directory
+void xfiles_list(const char* path, void* data, xfiles_list_callback_t* cb);
 
 #ifdef __cplusplus
 }
@@ -365,10 +383,75 @@ bool xfiles_get_user_directory(char* out, size_t outlen, enum XFILES_USER_DIRECT
     return false;
 }
 
+void xfiles_list(const char* path, void* data, xfiles_list_callback_t* callback)
+{
+    // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-findfirstfilew
+    // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-findnextfilew
+    // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-findclose
+
+    HANDLE             hFind = INVALID_HANDLE_VALUE;
+    WIN32_FIND_DATAW   FindData;
+    xfiles_list_item_t Item;
+    bool               HasNext = 0;
+
+    {
+        WCHAR PathUnicode[MAX_PATH] = {0};
+        int   n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, PathUnicode, ARRLEN(PathUnicode));
+        if (n)
+        {
+            PathUnicode[n] = 0;
+            wcsncat(PathUnicode, L"\\*", ARRLEN(PathUnicode) - n - 1);
+            hFind = FindFirstFileW(PathUnicode, &FindData);
+        }
+    }
+
+    HasNext = hFind != INVALID_HANDLE_VALUE;
+    XFILES_ASSERT(hFind != INVALID_HANDLE_VALUE);
+
+    Item.name_idx = snprintf(Item.path, sizeof(Item.path), "%s\\", path);
+
+    while (HasNext)
+    {
+        int NameLen = WideCharToMultiByte(
+            CP_UTF8,
+            WC_ERR_INVALID_CHARS,
+            FindData.cFileName,
+            -1,
+            Item.path + Item.name_idx,
+            sizeof(Item.path) - Item.name_idx,
+            NULL,
+            NULL);
+        XFILES_ASSERT(NameLen);
+        if (NameLen == 0) // Failed conversion
+            goto iterate;
+
+        Item.path_len = Item.name_idx + NameLen - 1;
+
+        Item.ext_idx = Item.name_idx;
+        for (uint32_t i = Item.name_idx; i < Item.path_len; i++)
+            if (Item.path[i] == '.')
+                Item.ext_idx = i;
+        if (Item.ext_idx == Item.name_idx) // Failed to find extension
+            Item.ext_idx = Item.path_len;
+
+        XFILES_ASSERT(strlen(Item.path) == Item.path_len);
+        Item.is_dir = FindData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY;
+        callback(data, &Item);
+
+    iterate:
+        HasNext = FindNextFileW(hFind, &FindData);
+    }
+
+    if (hFind != INVALID_HANDLE_VALUE)
+        FindClose(hFind);
+}
+
 #endif // _WIN32
 
 #ifdef __APPLE__
+#include <dirent.h>
 #include <fcntl.h>
+#include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -454,6 +537,53 @@ bool xfiles_append(const char* path, const char* in, size_t inlen)
 // https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/unlink.2.html
 bool xfiles_delete(const char* path) { return unlink(path) == 0; }
 
+void xfiles_list(const char* path, void* data, xfiles_list_callback_t* callback)
+{
+    // https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man3/opendir.3.html
+    // https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man3/readdir.3.html
+    // https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man3/closedir.3.html
+
+    DIR*               dir   = NULL;
+    struct dirent*     entry = NULL;
+    xfiles_list_item_t item;
+
+    dir = opendir(path);
+    if (dir)
+        entry = readdir(dir);
+
+    item.name_idx = snprintf(item.path, sizeof(item.path), "%s/", path);
+
+    while (entry)
+    {
+        item.path_len = item.name_idx + entry->d_namlen;
+
+        xassert(item.path_len < sizeof(item.path));
+        if (item.path_len >= sizeof(item.path)) // Guard overflow
+            goto iterate;
+
+        memcpy(&item.path[item.name_idx], entry->d_name, entry->d_namlen);
+        item.path[item.path_len] = 0;
+
+        item.ext_idx = item.name_idx;
+        for (uint32_t i = item.name_idx; i < item.path_len; i++)
+            if (item.path[i] == '.')
+                item.ext_idx = i;
+        if (item.ext_idx == item.name_idx) // Failed to find extension
+            item.ext_idx = item.path_len;
+        item.is_dir = DT_DIR & entry->d_type;
+
+        xassert(strlen(item.path) == item.path_len);
+        callback(data, &item);
+
+    iterate:
+        // readdir returns NULL if no more files, breaking the loop
+        entry = readdir(dir);
+    }
+
+    if (dir)
+        closedir(dir);
+}
+
 #ifdef __OBJC__
 #import <AppKit/NSWorkspace.h>
 
@@ -473,7 +603,7 @@ bool xfiles_trash(const char* path)
     // https://openradar.appspot.com/radar?id=5063396789583872
     ok = [fm trashItemAtURL:itemUrl resultingItemURL:&resultingURL error:&error];
 
-#if ! __has_feature(objc_arc)
+#if !__has_feature(objc_arc)
     [fm release];
     [itemUrl release];
     [str release];
@@ -573,7 +703,7 @@ bool xfiles_create_directory_recursive(const char* path)
         if (nextpath[i] == XFILES_DIR_CHAR)
         {
             nextpath[i] = '\0';
-            if (! xfiles_exists(nextpath))
+            if (!xfiles_exists(nextpath))
                 xfiles_create_directory(nextpath);
             XFILES_ASSERT(xfiles_exists(nextpath));
             nextpath[i] = XFILES_DIR_CHAR;
