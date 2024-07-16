@@ -454,6 +454,7 @@ void xfiles_list(const char* path, void* data, xfiles_list_callback_t* callback)
 #ifdef __APPLE__
 #include <dirent.h>
 #include <fcntl.h>
+#include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -560,7 +561,7 @@ void xfiles_list(const char* path, void* data, xfiles_list_callback_t* callback)
     {
         item.path_len = item.name_idx + entry->d_namlen;
 
-        xassert(item.path_len < sizeof(item.path));
+        XFILES_ASSERT(item.path_len < sizeof(item.path));
         if (item.path_len >= sizeof(item.path)) // Guard overflow
             goto iterate;
 
@@ -575,7 +576,7 @@ void xfiles_list(const char* path, void* data, xfiles_list_callback_t* callback)
             item.ext_idx = item.path_len;
         item.is_dir = DT_DIR & entry->d_type;
 
-        xassert(strlen(item.path) == item.path_len);
+        XFILES_ASSERT(strlen(item.path) == item.path_len);
         callback(data, &item);
 
     iterate:
