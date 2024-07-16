@@ -128,9 +128,9 @@ typedef struct xfiles_list_item_t
 {
     char path[1024];
 
-    uint32_t path_len;
-    uint32_t name_idx;
-    uint32_t ext_idx;
+    unsigned path_len;
+    unsigned name_idx;
+    unsigned ext_idx;
     bool     is_dir;
 } xfiles_list_item_t;
 
@@ -150,6 +150,9 @@ void xfiles_list(const char* path, void* data, xfiles_list_callback_t* cb);
 #include <Shlobj.h>
 #include <Shlwapi.h>
 #include <shellapi.h>
+#include <stdio.h>
+
+#pragma comment(lib, "Shlwapi.lib")
 
 bool xfiles_exists(const char* path)
 {
@@ -396,11 +399,11 @@ void xfiles_list(const char* path, void* data, xfiles_list_callback_t* callback)
 
     {
         WCHAR PathUnicode[MAX_PATH] = {0};
-        int   n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, PathUnicode, ARRLEN(PathUnicode));
+        int   n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, PathUnicode, XFILES_ARRLEN(PathUnicode));
         if (n)
         {
             PathUnicode[n] = 0;
-            wcsncat(PathUnicode, L"\\*", ARRLEN(PathUnicode) - n - 1);
+            wcsncat(PathUnicode, L"\\*", XFILES_ARRLEN(PathUnicode) - n - 1);
             hFind = FindFirstFileW(PathUnicode, &FindData);
         }
     }
@@ -428,7 +431,7 @@ void xfiles_list(const char* path, void* data, xfiles_list_callback_t* callback)
         Item.path_len = Item.name_idx + NameLen - 1;
 
         Item.ext_idx = Item.name_idx;
-        for (uint32_t i = Item.name_idx; i < Item.path_len; i++)
+        for (unsigned i = Item.name_idx; i < Item.path_len; i++)
             if (Item.path[i] == '.')
                 Item.ext_idx = i;
         if (Item.ext_idx == Item.name_idx) // Failed to find extension
