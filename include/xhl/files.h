@@ -593,6 +593,9 @@ bool xfiles_append(const char* path, const char* in, size_t inlen)
     return nwritten != -1;
 }
 
+// https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/rename.2.html
+bool xfiles_move(const char* from, const char* to) { return 0 == rename(from, to); }
+
 // https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/unlink.2.html
 bool xfiles_delete(const char* path) { return unlink(path) == 0; }
 
@@ -675,6 +678,13 @@ bool xfiles_open_file_explorer(const char* path)
     BOOL ok = [[NSWorkspace sharedWorkspace] openFile:@(path) withApplication:@"Finder"];
     XFILES_ASSERT(ok);
     return ok;
+}
+
+bool xfiles_select_in_file_explorer(const char* path)
+{
+    // https://developer.apple.com/documentation/appkit/nsworkspace/1524399-selectfile
+    [[NSWorkspace sharedWorkspace] selectFile:@(path) inFileViewerRootedAtPath:@("")];
+    return true;
 }
 
 bool xfiles_get_user_directory(char* out, size_t outlen, enum XFILES_USER_DIRECTORY loc)
