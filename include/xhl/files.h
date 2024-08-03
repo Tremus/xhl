@@ -311,7 +311,7 @@ bool xfiles_move(const char* from, const char* to)
     WCHAR FromPath[MAX_PATH];
     WCHAR ToPath[MAX_PATH];
     int   num1 = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, from, -1, FromPath, XFILES_ARRLEN(FromPath));
-    int   num2 = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, from, -1, FromPath, XFILES_ARRLEN(FromPath));
+    int   num2 = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, to, -1, ToPath, XFILES_ARRLEN(ToPath));
     if (num1 && num2)
         return MoveFileW(FromPath, ToPath);
     return false;
