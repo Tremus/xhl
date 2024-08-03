@@ -39,11 +39,15 @@
 #include <stddef.h>
 
 #ifdef _WIN32
-#define XFILES_DIR_STR  "\\"
-#define XFILES_DIR_CHAR '\\'
+#define XFILES_DIR_STR      "\\"
+#define XFILES_DIR_CHAR     '\\'
+#define XFILES_BROWSER_NAME "File Explorer"
+#define XFILES_TRASH_NAME   "Recycle Bin"
 #else
-#define XFILES_DIR_STR  "/"
-#define XFILES_DIR_CHAR '/'
+#define XFILES_DIR_STR      "/"
+#define XFILES_DIR_CHAR     '/'
+#define XFILES_BROWSER_NAME "Finder"
+#define XFILES_TRASH_NAME   "Trash"
 #endif
 
 #define XFILES_ARRLEN(arr) (sizeof(arr) / sizeof(arr[0]))
@@ -93,6 +97,9 @@ bool xfiles_write(const char* path, const void* in, size_t inlen);
 // Creates file if it doesn't exist with default access permissions.
 // Writes data starting from the end of a file, leaving old contents intact
 bool xfiles_append(const char* path, const char* in, size_t inlen);
+// Renames / moves file or folder
+// You are advised to check for path collisions using xfiles_exists() beforehand
+bool xfiles_move(const char* from, const char* to);
 
 // Moves the file to:
 // Win: Recycle Bin /
@@ -100,10 +107,14 @@ bool xfiles_append(const char* path, const char* in, size_t inlen);
 bool xfiles_trash(const char* path);
 // No bins. File is deleted and is likely unrecoverable
 bool xfiles_delete(const char* path);
-// Opens OS file browsing app with path selected
+// Opens OS file or folder as if it was opened with
 // Win: File Explorer /
 // OSX: Finder
 bool xfiles_open_file_explorer(const char* path);
+// Opens OS file browsing app with path selected
+// Win: File Explorer /
+// OSX: Finder
+bool xfiles_select_in_file_explorer(const char* path);
 
 enum XFILES_USER_DIRECTORY
 {
@@ -294,6 +305,18 @@ bool xfiles_append(const char* path, const char* in, size_t inlen)
     return ok;
 }
 
+bool xfiles_move(const char* from, const char* to)
+{
+    // https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-movefilew
+    WCHAR FromPath[MAX_PATH];
+    WCHAR ToPath[MAX_PATH];
+    int   num1 = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, from, -1, FromPath, XFILES_ARRLEN(FromPath));
+    int   num2 = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, from, -1, FromPath, XFILES_ARRLEN(FromPath));
+    if (num1 && num2)
+        return MoveFileW(FromPath, ToPath);
+    return false;
+}
+
 bool xfiles_trash(const char* path)
 {
     // https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shfileoperationw
@@ -344,6 +367,38 @@ bool xfiles_open_file_explorer(const char* path)
         INT_PTR ret = (INT_PTR)ShellExecuteW(NULL, L"open", FilePath, NULL, NULL, SW_SHOWDEFAULT);
         XFILES_ASSERT(ret > 32);
         return ret > 32;
+
+        // https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-shopenfolderandselectitems
+        LPITEMIDLIST pItemList = ILCreateFromPathW(FilePath);
+        if (pItemList)
+        {
+            SHOpenFolderAndSelectItems(pItemList, 0, 0, 0);
+            ILFree(pItemList);
+        }
+    }
+    return false;
+}
+
+bool xfiles_select_in_file_explorer(const char* path)
+{
+    // https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-shopenfolderandselectitems
+    // https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-ilcreatefrompathw
+    WCHAR FilePath[MAX_PATH];
+    int   num = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, FilePath, XFILES_ARRLEN(FilePath));
+    XFILES_ASSERT(num);
+    if (num)
+    {
+        LPITEMIDLIST pItemList = ILCreateFromPathW(FilePath);
+        if (pItemList)
+        {
+            CoInitialize(NULL);
+            HRESULT hres = SHOpenFolderAndSelectItems(pItemList, 0, 0, 0);
+            XFILES_ASSERT(hres == S_OK);
+            ILFree(pItemList);
+            CoUninitialize();
+
+            return hres = S_OK;
+        }
     }
     return false;
 }
