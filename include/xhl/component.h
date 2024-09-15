@@ -217,7 +217,7 @@ typedef struct xcomp_root
 // Check is not all 0s
 static inline bool xcomp_is_empty(xcomp_dimensions d);
 // Check mouse & keyboard mod flags for popup menu
-static inline bool xcomp_is_popup_menu(uint64_t mods);
+static inline bool xcomp_is_popup_menu(uint32_t event, uint64_t mods);
 // Check coordinate lies within dimensions
 static inline bool           xcomp_hit_test(xcomp_dimensions d, xcomp_position pos);
 static inline xcomp_position xcomp_centre(xcomp_dimensions d);
@@ -281,13 +281,14 @@ void xcomp_root_refresh(xcomp_root*);
 
 bool xcomp_is_empty(xcomp_dimensions d) { return d.width == 0.0f || d.height == 0.0f; }
 
-bool xcomp_is_popup_menu(uint64_t mods)
+bool xcomp_is_popup_menu(uint32_t event, uint64_t mods)
 {
-    return
 #ifdef __APPLE__
-        ((mods & (XCOMP_MOD_KEY_CTRL | XCOMP_MOD_LEFT_BUTTON)) == (XCOMP_MOD_KEY_CTRL | XCOMP_MOD_LEFT_BUTTON)) ||
+        uint64_t lctrl = XCOMP_MOD_KEY_CTRL | XCOMP_MOD_LEFT_BUTTON;
+        return event == XCOMP_EVENT_MOUSE_RIGHT_DOWN || (event == XCOMP_EVENT_MOUSE_LEFT_DOWN && (mods & lctrl) == lctrl);
+#else
+        return event == XCOMP_EVENT_MOUSE_RIGHT_CLICK;
 #endif
-        (mods & XCOMP_MOD_RIGHT_BUTTON);
 }
 
 bool xcomp_hit_test(xcomp_dimensions d, xcomp_position pos)
