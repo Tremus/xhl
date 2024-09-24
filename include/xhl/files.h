@@ -435,6 +435,7 @@ bool xfiles_get_user_directory(char* out, size_t outlen, enum XFILES_USER_DIRECT
     {
         int num = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, Path, -1, out, outlen, NULL, NULL);
         XFILES_ASSERT(num);
+        CoTaskMemFree(Path);
         return num != 0;
     }
 
