@@ -261,6 +261,9 @@ xcomp_component* xcomp_find_child_at(xcomp_component*, xcomp_position);
 // outside of screen dimensions
 xcomp_component* xcomp_find_parent_at(xcomp_component*, xcomp_position);
 
+// Send the same event to every child in tree. Uses depth-first search algorithm.
+void xcomp_send_event_to_children_recursive(xcomp_component* comp, uint32_t ev_type, xcomp_event_data info);
+
 // ROOT METHODS
 void xcomp_send_mouse_position(xcomp_root*, xcomp_event_data info);
 void xcomp_send_mouse_down(xcomp_root*, xcomp_event_data info);
@@ -284,10 +287,10 @@ bool xcomp_is_empty(xcomp_dimensions d) { return d.width == 0.0f || d.height == 
 bool xcomp_is_popup_menu(uint32_t event, uint64_t mods)
 {
 #ifdef __APPLE__
-        uint64_t lctrl = XCOMP_MOD_KEY_CTRL | XCOMP_MOD_LEFT_BUTTON;
-        return event == XCOMP_EVENT_MOUSE_RIGHT_DOWN || (event == XCOMP_EVENT_MOUSE_LEFT_DOWN && (mods & lctrl) == lctrl);
+    uint64_t lctrl = XCOMP_MOD_KEY_CTRL | XCOMP_MOD_LEFT_BUTTON;
+    return event == XCOMP_EVENT_MOUSE_RIGHT_DOWN || (event == XCOMP_EVENT_MOUSE_LEFT_DOWN && (mods & lctrl) == lctrl);
 #else
-        return event == XCOMP_EVENT_MOUSE_RIGHT_CLICK;
+    return event == XCOMP_EVENT_MOUSE_RIGHT_CLICK;
 #endif
 }
 
@@ -344,7 +347,7 @@ void xcomp_root_give_keyboard_focus(xcomp_root* root, xcomp_component* next_comp
 
     // check should take keyboard focus
     if (next_comp != NULL && (next_comp->flags & XCOMP_FLAG_WANTS_KEYBOARD_FOCUS) &&
-        ! (next_comp->flags & XCOMP_FLAG_HAS_KEYBOARD_FOCUS))
+        !(next_comp->flags & XCOMP_FLAG_HAS_KEYBOARD_FOCUS))
     {
         next_comp->flags |= XCOMP_FLAG_HAS_KEYBOARD_FOCUS;
         next_comp->event_handler(next_comp, XCOMP_EVENT_KEYBOARD_FOCUS_GAINED, edata);
@@ -429,8 +432,8 @@ void xcomp_set_size(xcomp_component* comp, float width, float height)
 
 void xcomp_add_child(xcomp_component* comp, xcomp_component* child)
 {
-    comp->children[comp->num_children]  = child;
-    child->parent                       = comp;
+    comp->children[comp->num_children] = child;
+    child->parent                      = comp;
     comp->num_children                 += 1;
 }
 
@@ -510,7 +513,7 @@ xcomp_component* xcomp_find_child_at(xcomp_component* comp, xcomp_position p)
         xcomp_component* child = comp->children[i];
 
         // if visible and mouse within dimensions
-        if (! ((child->flags & (XCOMP_FLAG_IS_HIDDEN | XCOMP_FLAG_IS_DISABLED)) != 0) &&
+        if (!((child->flags & (XCOMP_FLAG_IS_HIDDEN | XCOMP_FLAG_IS_DISABLED)) != 0) &&
             xcomp_hit_test(child->dimensions, p))
             return xcomp_find_child_at(child, p);
     }
@@ -520,10 +523,17 @@ xcomp_component* xcomp_find_child_at(xcomp_component* comp, xcomp_position p)
 
 xcomp_component* xcomp_find_parent_at(xcomp_component* comp, xcomp_position p)
 {
-    if (comp->parent != NULL && ! xcomp_hit_test(comp->parent->dimensions, p))
+    if (comp->parent != NULL && !xcomp_hit_test(comp->parent->dimensions, p))
         return xcomp_find_parent_at(comp->parent, p);
 
     return NULL;
+}
+
+void xcomp_send_event_to_children_recursive(xcomp_component* comp, uint32_t ev_type, xcomp_event_data info)
+{
+    comp->event_handler(comp, ev_type, info);
+    for (int i = 0; i < comp->num_children; i++)
+        xcomp_send_event_to_children_recursive(comp->children[i], ev_type, info);
 }
 
 void xcomp_send_mouse_enter(xcomp_component* comp, xcomp_event_data info)
@@ -652,8 +662,8 @@ void xcomp_send_mouse_down(xcomp_root* root, xcomp_event_data info)
     {
         if (comp != root->keyboard_focus && root->keyboard_focus != NULL)
         {
-            xcomp_component* last_comp  = root->keyboard_focus;
-            root->keyboard_focus        = NULL;
+            xcomp_component* last_comp = root->keyboard_focus;
+            root->keyboard_focus       = NULL;
             last_comp->flags           &= ~XCOMP_FLAG_HAS_KEYBOARD_FOCUS;
             last_comp->event_handler(last_comp, XCOMP_EVENT_KEYBOARD_FOCUS_LOST, info);
         }
@@ -664,9 +674,9 @@ void xcomp_send_mouse_down(xcomp_root* root, xcomp_event_data info)
         // handle left button
         if ((info.modifiers & XCOMP_MOD_LEFT_BUTTON) && root->mouse_left_down == NULL)
         {
-            root->mouse_left_down   = comp;
-            root->mouse_down_pos.x  = info.x;
-            root->mouse_down_pos.y  = info.y;
+            root->mouse_left_down  = comp;
+            root->mouse_down_pos.x = info.x;
+            root->mouse_down_pos.y = info.y;
             comp->flags            |= XCOMP_FLAG_IS_MOUSE_LEFT_DOWN;
 
             comp->event_handler(comp, XCOMP_EVENT_MOUSE_LEFT_DOWN, info);
@@ -675,7 +685,7 @@ void xcomp_send_mouse_down(xcomp_root* root, xcomp_event_data info)
         // handle right button
         if ((info.modifiers & XCOMP_MOD_RIGHT_BUTTON) && root->mouse_right_down == NULL)
         {
-            root->mouse_right_down  = comp;
+            root->mouse_right_down = comp;
             comp->flags            |= XCOMP_FLAG_IS_MOUSE_RIGHT_DOWN;
 
             comp->event_handler(comp, XCOMP_EVENT_MOUSE_RIGHT_DOWN, info);
@@ -684,7 +694,7 @@ void xcomp_send_mouse_down(xcomp_root* root, xcomp_event_data info)
         // handle middle button
         if ((info.modifiers & XCOMP_MOD_MIDDLE_BUTTON) && root->mouse_middle_down == NULL)
         {
-            root->mouse_middle_down  = comp;
+            root->mouse_middle_down = comp;
             comp->flags             |= XCOMP_FLAG_IS_MOUSE_MIDDLE_DOWN;
 
             comp->event_handler(comp, XCOMP_EVENT_MOUSE_MIDDLE_DOWN, info);
@@ -701,7 +711,7 @@ void xcomp_send_mouse_up(xcomp_root* root, xcomp_event_data info, uint32_t time_
     if (root->mouse_left_down != NULL && (info.modifiers & XCOMP_MOD_LEFT_BUTTON) == 0)
     {
         xcomp_component* last_comp = root->mouse_left_down;
-        bool             dragging  = ! ! (last_comp->flags & XCOMP_FLAG_IS_DRAGGING);
+        bool             dragging  = !!(last_comp->flags & XCOMP_FLAG_IS_DRAGGING);
         root->mouse_left_down      = NULL;
 
         if (last_comp->flags & XCOMP_FLAG_IS_MOUSE_LEFT_DOWN)
@@ -726,7 +736,7 @@ void xcomp_send_mouse_up(xcomp_root* root, xcomp_event_data info, uint32_t time_
                 xcomp_send_mouse_exit(last_comp, info);
         }
 
-        if (last_comp == comp && ! dragging)
+        if (last_comp == comp && !dragging)
         {
             uint32_t diff = time_ms - root->last_left_click_time;
 
