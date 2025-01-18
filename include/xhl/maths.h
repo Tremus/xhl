@@ -116,7 +116,7 @@ float xm_fastsech(float x);
 float xm_fastcsch(float x);
 
 float xm_fastatan(float x);
-float xm_fastatan2(float x, float y);
+float xm_fastatan2(float y, float x);
 
 float xm_fastlog(float a);
 // ~6x faster than log2f
@@ -466,7 +466,7 @@ float xm_fastatan(float x)
 }
 
 // Code: https://gist.github.com/bitonic/d0f5a0a44e37d4f0be03d34d47acb6cf
-float xm_fastatan2(float x, float y)
+float xm_fastatan2(float y, float x)
 {
     bool  swap       = fabsf(x) < fabsf(y);
     float atan_input = (swap ? x : y) / (swap ? y : x);
