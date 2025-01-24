@@ -305,7 +305,6 @@ bool xcomp_is_popup_menu(uint32_t event, uint64_t mods)
 
 bool xcomp_hit_test(xcomp_dimensions d, xcomp_position pos)
 {
-    XCOMP_ASSERT(!xcomp_is_empty(d));
     float r = d.x + d.width;
     float b = d.y + d.height;
     return pos.x >= d.x && pos.y >= d.y && pos.x < r && pos.y < b;
@@ -425,7 +424,7 @@ void xcomp_add_child(xcomp_component* comp, xcomp_component* child)
 {
     comp->children[comp->num_children] = child;
     child->parent                      = comp;
-    comp->num_children                 += 1;
+    comp->num_children++;
 }
 
 void xcomp_remove_child(xcomp_component* comp, xcomp_component* child)
@@ -657,8 +656,8 @@ void xcomp_send_mouse_down(xcomp_root* root, xcomp_event_data info)
         XCOMP_ASSERT(comp->flags & XCOMP_FLAG_IS_MOUSE_OVER);
         if (comp != root->keyboard_focus && root->keyboard_focus != NULL)
         {
-            xcomp_component* last_comp = root->keyboard_focus;
-            root->keyboard_focus       = NULL;
+            xcomp_component* last_comp  = root->keyboard_focus;
+            root->keyboard_focus        = NULL;
             last_comp->flags           &= ~XCOMP_FLAG_HAS_KEYBOARD_FOCUS;
             last_comp->event_handler(last_comp, XCOMP_EVENT_KEYBOARD_FOCUS_LOST, info);
         }
@@ -672,8 +671,8 @@ void xcomp_send_mouse_down(xcomp_root* root, xcomp_event_data info)
             root->mouse_left_down  = comp;
             root->mouse_down_pos.x = info.x;
             root->mouse_down_pos.y = info.y;
-            comp->flags            |= XCOMP_FLAG_IS_MOUSE_LEFT_DOWN;
 
+            comp->flags |= XCOMP_FLAG_IS_MOUSE_LEFT_DOWN;
             comp->event_handler(comp, XCOMP_EVENT_MOUSE_LEFT_DOWN, info);
         }
 
@@ -681,8 +680,8 @@ void xcomp_send_mouse_down(xcomp_root* root, xcomp_event_data info)
         if ((info.modifiers & XCOMP_MOD_RIGHT_BUTTON) && root->mouse_right_down == NULL)
         {
             root->mouse_right_down = comp;
-            comp->flags            |= XCOMP_FLAG_IS_MOUSE_RIGHT_DOWN;
 
+            comp->flags |= XCOMP_FLAG_IS_MOUSE_RIGHT_DOWN;
             comp->event_handler(comp, XCOMP_EVENT_MOUSE_RIGHT_DOWN, info);
         }
 
@@ -690,8 +689,8 @@ void xcomp_send_mouse_down(xcomp_root* root, xcomp_event_data info)
         if ((info.modifiers & XCOMP_MOD_MIDDLE_BUTTON) && root->mouse_middle_down == NULL)
         {
             root->mouse_middle_down = comp;
-            comp->flags             |= XCOMP_FLAG_IS_MOUSE_MIDDLE_DOWN;
 
+            comp->flags |= XCOMP_FLAG_IS_MOUSE_MIDDLE_DOWN;
             comp->event_handler(comp, XCOMP_EVENT_MOUSE_MIDDLE_DOWN, info);
         }
     }
