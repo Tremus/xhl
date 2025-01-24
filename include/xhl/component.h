@@ -7,6 +7,18 @@
  * No allocations
  */
 
+#ifdef NDEBUG
+#define XCOMP_ASSERT(...)
+#else // !NDEBUG
+
+#ifdef _WIN32
+#define XCOMP_ASSERT(cond) (cond) ? (void)0 : __debugbreak()
+#else
+#define XCOMP_ASSERT(cond) (cond) ? (void)0 : __builtin_debugtrap()
+#endif
+
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -231,7 +243,6 @@ void xcomp_empty_event_cb(xcomp_component*, uint32_t, xcomp_event_data);
 // set x/y/w/h on component, then send event
 void xcomp_set_dimensions(xcomp_component* comp, xcomp_dimensions dimensions);
 
-void xcomp_set_position(xcomp_component* comp, xcomp_position);
 void xcomp_set_size(xcomp_component* comp, float width, float height);
 
 // resizes num children
@@ -244,8 +255,6 @@ void xcomp_set_visible(xcomp_component* comp, bool visible);
 // You should call xcomp_root_clear() after using this!
 void xcomp_set_enabled(xcomp_component* comp, bool enabled);
 
-static inline bool xcomp_is_hidden(xcomp_component*);
-static inline bool xcomp_is_enabled(xcomp_component*);
 // Traverses backwards through parent hierarchy until it finds the root.
 // If you keep a pointer to your whole applicaton on your root component, then
 // this is a useful way to retrieve it inside event callbacks from any child in
@@ -296,22 +305,16 @@ bool xcomp_is_popup_menu(uint32_t event, uint64_t mods)
 
 bool xcomp_hit_test(xcomp_dimensions d, xcomp_position pos)
 {
+    XCOMP_ASSERT(!xcomp_is_empty(d));
     float r = d.x + d.width;
     float b = d.y + d.height;
-    return pos.x >= d.x && pos.y >= d.y && pos.x <= r && pos.y <= b;
+    return pos.x >= d.x && pos.y >= d.y && pos.x < r && pos.y < b;
 }
 
 xcomp_position xcomp_centre(xcomp_dimensions d)
 {
     xcomp_position p = {.x = 0.5f * d.width + d.x, .y = 0.5f * d.height + d.y};
     return p;
-}
-
-bool xcomp_is_hidden(xcomp_component* comp) { return (comp->flags & XCOMP_FLAG_IS_HIDDEN) == XCOMP_FLAG_IS_HIDDEN; }
-
-bool xcomp_is_enabled(xcomp_component* comp)
-{
-    return (comp->flags & XCOMP_FLAG_IS_DISABLED) != XCOMP_FLAG_IS_DISABLED;
 }
 
 #ifdef __cplusplus
@@ -327,8 +330,6 @@ bool xcomp_is_enabled(xcomp_component* comp)
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-void xcomp_send_mouse_exit(xcomp_component* comp, xcomp_event_data info);
 
 void xcomp_root_give_keyboard_focus(xcomp_root* root, xcomp_component* next_comp)
 {
@@ -408,16 +409,6 @@ void xcomp_set_dimensions(xcomp_component* comp, xcomp_dimensions dimensions)
     xcomp_event_data data = {.raw = 0ul};
     comp->event_handler(comp, XCOMP_EVENT_POSITION_CHANGED, data);
     comp->event_handler(comp, XCOMP_EVENT_SIZE_CHANGED, data);
-    comp->event_handler(comp, XCOMP_EVENT_DIMENSION_CHANGED, data);
-}
-
-void xcomp_set_position(xcomp_component* comp, xcomp_position pos)
-{
-    comp->dimensions.x = pos.x;
-    comp->dimensions.y = pos.y;
-
-    xcomp_event_data data = {.raw = 0ul};
-    comp->event_handler(comp, XCOMP_EVENT_POSITION_CHANGED, data);
     comp->event_handler(comp, XCOMP_EVENT_DIMENSION_CHANGED, data);
 }
 
@@ -513,8 +504,8 @@ xcomp_component* xcomp_find_child_at(xcomp_component* comp, xcomp_position p)
         xcomp_component* child = comp->children[i];
 
         // if visible and mouse within dimensions
-        if (!((child->flags & (XCOMP_FLAG_IS_HIDDEN | XCOMP_FLAG_IS_DISABLED)) != 0) &&
-            xcomp_hit_test(child->dimensions, p))
+        bool should_skip = child->flags & (XCOMP_FLAG_IS_HIDDEN | XCOMP_FLAG_IS_DISABLED);
+        if (!should_skip && xcomp_hit_test(child->dimensions, p))
             return xcomp_find_child_at(child, p);
     }
 
@@ -538,6 +529,7 @@ void xcomp_send_event_to_children_recursive(xcomp_component* comp, uint32_t ev_t
 
 void xcomp_send_mouse_enter(xcomp_component* comp, xcomp_event_data info)
 {
+    XCOMP_ASSERT(!(comp->flags & XCOMP_FLAG_IS_MOUSE_OVER));
     comp->flags |= XCOMP_FLAG_IS_MOUSE_OVER;
     comp->event_handler(comp, XCOMP_EVENT_MOUSE_ENTER, info);
     comp->event_handler(comp, XCOMP_EVENT_MOUSE_MOVE, info);
@@ -545,6 +537,7 @@ void xcomp_send_mouse_enter(xcomp_component* comp, xcomp_event_data info)
 
 void xcomp_send_mouse_exit(xcomp_component* comp, xcomp_event_data info)
 {
+    XCOMP_ASSERT(comp->flags & XCOMP_FLAG_IS_MOUSE_OVER);
     comp->flags &= ~XCOMP_FLAG_IS_MOUSE_OVER;
 
     if (comp->flags & XCOMP_FLAG_IS_MOUSE_LEFT_DOWN)
@@ -626,6 +619,8 @@ void xcomp_send_mouse_position(xcomp_root* root, xcomp_event_data info)
     }
     else
     {
+        XCOMP_ASSERT(last_over->flags & XCOMP_FLAG_IS_MOUSE_OVER);
+
         // check mouse still over
         if (xcomp_hit_test(last_over->dimensions, root->position))
             next_over = xcomp_find_child_at(last_over, root->position);
@@ -639,6 +634,7 @@ void xcomp_send_mouse_position(xcomp_root* root, xcomp_event_data info)
         // if failed finding child
         if (last_over == next_over)
         {
+            XCOMP_ASSERT(next_over->flags & XCOMP_FLAG_IS_MOUSE_OVER);
             next_over->event_handler(next_over, XCOMP_EVENT_MOUSE_MOVE, info);
         }
         else
@@ -650,8 +646,6 @@ void xcomp_send_mouse_position(xcomp_root* root, xcomp_event_data info)
                 xcomp_send_mouse_enter(next_over, info);
         }
     }
-    // TODO: handle mouse wheel
-    // TODO: handle mouse pinch
 }
 
 void xcomp_send_mouse_down(xcomp_root* root, xcomp_event_data info)
@@ -660,6 +654,7 @@ void xcomp_send_mouse_down(xcomp_root* root, xcomp_event_data info)
     xcomp_component* comp = xcomp_find_child_at(root->main, pos);
     if (comp != NULL)
     {
+        XCOMP_ASSERT(comp->flags & XCOMP_FLAG_IS_MOUSE_OVER);
         if (comp != root->keyboard_focus && root->keyboard_focus != NULL)
         {
             xcomp_component* last_comp = root->keyboard_focus;
@@ -732,12 +727,18 @@ void xcomp_send_mouse_up(xcomp_root* root, xcomp_event_data info, uint32_t time_
             last_comp->flags &= ~XCOMP_FLAG_IS_DRAGGING;
             last_comp->event_handler(last_comp, XCOMP_EVENT_DRAG_END, info);
 
-            if (comp != last_comp)
+            if (comp != last_comp && (last_comp->flags & XCOMP_FLAG_IS_MOUSE_OVER))
+            {
+                XCOMP_ASSERT(root->mouse_over == last_comp);
+                root->mouse_over = NULL;
                 xcomp_send_mouse_exit(last_comp, info);
+                xcomp_send_mouse_position(root, info);
+            }
         }
 
         if (last_comp == comp && !dragging)
         {
+            XCOMP_ASSERT(comp);
             uint32_t diff = time_ms - root->last_left_click_time;
 
             if (root->mouse_last_left_click != last_comp)
@@ -756,13 +757,6 @@ void xcomp_send_mouse_up(xcomp_root* root, xcomp_event_data info, uint32_t time_
                 comp->event_handler(comp, XCOMP_EVENT_MOUSE_LEFT_CLICK, info);
             else if (clicks == 2)
                 comp->event_handler(comp, XCOMP_EVENT_MOUSE_LEFT_DOUBLE_CLICK, info);
-        }
-        // If components do not match, the component must have been dragged into
-        // different boundaries. We need to find which component the mouse is
-        // hovering over
-        else
-        {
-            xcomp_send_mouse_position(root, info);
         }
     }
 
@@ -803,11 +797,6 @@ void xcomp_send_mouse_up(xcomp_root* root, xcomp_event_data info, uint32_t time_
             last_comp->event_handler(last_comp, XCOMP_EVENT_MOUSE_MIDDLE_CLICK, info);
         }
     }
-}
-
-void xcomp_send_keyboard_message(xcomp_root* root, xcomp_event_data info)
-{
-    // TODO
 }
 
 void xcomp_root_clear(xcomp_root* root)
