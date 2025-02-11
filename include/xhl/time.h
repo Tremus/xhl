@@ -45,8 +45,8 @@ void xtime_init()
     FILETIME filetime;
     GetSystemTimeAsFileTime(&filetime);
     xhl_unixtime_init  = (uint64_t)filetime.dwLowDateTime + ((uint64_t)(filetime.dwHighDateTime) << 32LL);
-    xhl_unixtime_init /= 10000;             // convert units 100 nanosecods > ms
-    xhl_unixtime_init -= 11644473600000ULL; // convert date from Jan 1, 1601 to Jan 1 1970.
+    xhl_unixtime_init -= 116444736000000000LL; // convert date from Jan 1, 1601 to Jan 1 1970.
+    xhl_unixtime_init /= 10000LL;              // convert units 100 nanosecods > ms
 }
 
 uint64_t xtime_now_ns()
