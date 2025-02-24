@@ -13,6 +13,12 @@
 #define XTHREAD_SIGNAL_WAIT_INFINITE (-1)
 #define XTHREAD_QUEUE_WAIT_INFINITE (-1)
 
+#ifdef _MSC_VER
+#define XTHREAD_LOCAL __declspec(thread)
+#else
+#define XTHREAD_LOCAL _Thread_local
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
