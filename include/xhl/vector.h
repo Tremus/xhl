@@ -33,8 +33,8 @@ typedef union
     struct { float t, b; };
     struct { float start, end; };
     struct { float x, y; };
-    struct { float height, width; };
-    struct { float h, w; };
+    struct { float width, height; };
+    struct { float w, h; };
     struct { float real, imag; };
     struct { float re, im; };
     struct { float angle, magnitude; };
