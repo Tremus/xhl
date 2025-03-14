@@ -173,7 +173,7 @@ uint32_t xm_popcountull(uint64_t x);
 
 // https://en.wikipedia.org/wiki/Xorshift
 uint32_t xm_xorshift32(uint32_t x);
-uint64_t xm_xorshift64(uint32_t x);
+uint64_t xm_xorshift64(uint64_t x);
 
 #ifdef __cplusplus
 }
@@ -638,7 +638,7 @@ uint32_t xm_xorshift32(uint32_t x)
     x ^= x << 5;
     return x;
 }
-uint64_t xm_xorshift64(uint32_t x)
+uint64_t xm_xorshift64(uint64_t x)
 {
     x ^= x << 13;
     x ^= x >> 7;
