@@ -59,8 +59,10 @@ enum
     // int deltaX = CGEventGetIntegerValueField([event CGEvent], kCGScrollWheelEventDeltaAxis2) * 120 // x is axis 2
     // int deltaY = CGEventGetIntegerValueField([event CGEvent], kCGScrollWheelEventDeltaAxis1) * 120
     XCOMP_EVENT_MOUSE_SCROLL_WHEEL,
-    // See: [NSEvent hasPreciseScrollingDeltas]
-    XCOMP_EVENT_MOUSE_SCROLL_TOUCHPAD,
+    // See: [NSEvent hasPreciseScrollingDeltas] and [NSEvent phase]
+    XCOMP_EVENT_MOUSE_TOUCHPAD_BEGIN,
+    XCOMP_EVENT_MOUSE_TOUCHPAD_MOVE,
+    XCOMP_EVENT_MOUSE_TOUCHPAD_END,
     XCOMP_EVENT_MOUSE_PINCH,
     // Dragging
     // These are sent to the component being dragged
