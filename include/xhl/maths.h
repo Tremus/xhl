@@ -134,6 +134,7 @@ float xm_fastexp(float x);
 float xm_fasterexp(float x);
 // Only ~10% faster than exp2f. Barely less accurate
 float xm_fastexp2(float p);
+float xm_fastpow(float a, float b);
 
 /*@*@*@*@*
  @ Fancy @
@@ -521,6 +522,15 @@ float xm_fastexp2(float p)
     xm_fi32 v = {.u32 = (uint32_t)((1 << 23) * (p + 121.2740575f + 27.7280233f / (4.84252568f - z) - 1.49012907f * z))};
 
     return v.f;
+}
+
+// ekmett powf_fast
+// https://github.com/ekmett/approximate/blob/master/cbits/fast.c
+float xm_fastpow(float a, float b)
+{
+    xm_fi32 u = {a};
+    u.i32     = (int)(b * (u.i32 - 1064866805) + 1064866805.0f);
+    return u.f;
 }
 
 float xm_fast_gain_to_dB(float gain) { return 20.0f * xm_fastlog10(gain); }
