@@ -118,11 +118,13 @@ void* xvalloc(void* hint, size_t size)
 void xvfree(void* ptr, size_t size)
 {
     xalloc_assert(ptr != NULL);
-    VirtualFree(ptr, size, 0);
+    BOOL ok = VirtualFree(ptr, 0, MEM_RELEASE);
 #ifndef NDEBUG
     g_num_xvallocs--;
     xalloc_assert(g_num_xvallocs >= 0);
+    DWORD err = GetLastError();
 #endif
+    xalloc_assert(ok);
 }
 
 #else // !_WIN32
