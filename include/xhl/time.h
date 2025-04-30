@@ -101,7 +101,11 @@ uint64_t xtime_unix_ms() { return xhl_unixtime_init + xtime_now_ns() / 1000000; 
 #define XTIME_LOG(...) fprintf(stderr, __VA_ARGS__)
 #endif // XTIME_LOG
 
+#ifdef _MSC_VER
+static __declspec(thread) uint64_t g_xhl_stopwatch = 0;
+#else
 static _Thread_local uint64_t g_xhl_stopwatch = 0;
+#endif
 
 void xtime_stopwatch_start() { g_xhl_stopwatch = xtime_now_ns(); }
 void xtime_stopwatch_log_ms(const char* msg_prefix)

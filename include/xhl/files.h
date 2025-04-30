@@ -160,6 +160,7 @@ void xfiles_list(const char* path, void* data, xfiles_list_callback_t* cb);
 
 #include <Shlobj.h>
 #include <Shlwapi.h>
+#include <assert.h>
 #include <shellapi.h>
 #include <stdio.h>
 
@@ -418,7 +419,11 @@ bool xfiles_get_user_directory(char* out, size_t outlen, enum XFILES_USER_DIRECT
         &FOLDERID_Pictures,       // XFILES_USER_DIRECTORY_PICTURES
         &FOLDERID_Videos,         // XFILES_USER_DIRECTORY_VIDEOS
     };
+#ifdef _MSC_VER
+    static_assert(XFILES_ARRLEN(FOLDER_IDS) == XFILES_USER_DIRECTORY_COUNT, "");
+#else
     _Static_assert(XFILES_ARRLEN(FOLDER_IDS) == XFILES_USER_DIRECTORY_COUNT, "");
+#endif
 
 #ifdef __cplusplus
 #define XFILES_REF(ptr) *ptr
