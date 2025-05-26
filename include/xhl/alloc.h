@@ -95,11 +95,14 @@ void* xcalloc(size_t num, size_t size)
 
 void xfree(void* ptr)
 {
-    free(ptr);
+    if (ptr != NULL) // The C standard says to do nothing with NULL pointers
+    {
+        free(ptr);
 #ifndef NDEBUG
-    g_num_xmallocs--;
-    xalloc_assert(g_num_xmallocs >= 0);
+        g_num_xmallocs--;
+        xalloc_assert(g_num_xmallocs >= 0);
 #endif
+    }
 }
 
 #ifdef _WIN32
