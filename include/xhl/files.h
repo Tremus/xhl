@@ -133,7 +133,8 @@ enum XFILES_USER_DIRECTORY
     XFILES_USER_DIRECTORY_COUNT,
 };
 
-bool xfiles_get_user_directory(char* out, size_t outlen, enum XFILES_USER_DIRECTORY loc);
+// Returns number of bytes written to 'char* out', excluding the null terminating byte
+int xfiles_get_user_directory(char* out, size_t outlen, enum XFILES_USER_DIRECTORY loc);
 
 typedef struct xfiles_list_item_t
 {
@@ -404,7 +405,7 @@ bool xfiles_select_in_file_explorer(const char* path)
     return false;
 }
 
-bool xfiles_get_user_directory(char* out, size_t outlen, enum XFILES_USER_DIRECTORY loc)
+int xfiles_get_user_directory(char* out, size_t outlen, enum XFILES_USER_DIRECTORY loc)
 {
     // https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-shgetknownfolderpath
     // https://learn.microsoft.com/en-us/windows/win32/shell/knownfolderid
@@ -431,20 +432,22 @@ bool xfiles_get_user_directory(char* out, size_t outlen, enum XFILES_USER_DIRECT
 #define XFILES_REF(ptr) ptr
 #endif
 
+    int   num  = 0;
     PWSTR Path = NULL;
     if (loc < 0)
         loc = (enum XFILES_USER_DIRECTORY)0;
     if (loc >= XFILES_USER_DIRECTORY_COUNT)
-        loc = (enum XFILES_USER_DIRECTORY)(XFILES_USER_DIRECTORY_COUNT - 1);
+        loc = (enum XFILES_USER_DIRECTORY)(ARRAYSIZE(FOLDER_IDS) - 1);
     if (S_OK == SHGetKnownFolderPath(XFILES_REF(FOLDER_IDS[loc]), 0, NULL, &Path))
     {
-        int num = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, Path, -1, out, outlen, NULL, NULL);
-        XFILES_ASSERT(num);
+        num = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, Path, -1, out, outlen, NULL, NULL);
+        if (num)
+            num--; // remove count of null byte
+        XFILES_ASSERT(num == strlen(out));
         CoTaskMemFree(Path);
-        return num != 0;
     }
 
-    return false;
+    return num;
 }
 
 void xfiles_list(const char* path, void* data, xfiles_list_callback_t* callback)
