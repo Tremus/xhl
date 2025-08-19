@@ -696,7 +696,7 @@ bool xfiles_select_in_file_explorer(const char* path)
     return true;
 }
 
-bool xfiles_get_user_directory(char* out, size_t outlen, enum XFILES_USER_DIRECTORY loc)
+int xfiles_get_user_directory(char* out, size_t outlen, enum XFILES_USER_DIRECTORY loc)
 {
     static const char* PATHS[] = {
         "",                             // XFILES_USER_DIRECTORY_HOME,
@@ -728,13 +728,13 @@ bool xfiles_get_user_directory(char* out, size_t outlen, enum XFILES_USER_DIRECT
 
     XFILES_ASSERT((homelen + subdirlen + 1) <= outlen);
     if ((homelen + subdirlen + 1) > outlen)
-        return false;
+        return 0;
 
     memcpy(out, homebuf, homelen);
     memcpy(out + homelen, subdir, subdirlen);
     out[homelen + subdirlen] = '\0';
 
-    return true;
+    return homelen + subdirlen;
 }
 
 #endif // __OBJC__
