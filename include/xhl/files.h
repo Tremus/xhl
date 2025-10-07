@@ -54,10 +54,11 @@
 
 #define XFILES_ARRLEN(arr) (sizeof(arr) / sizeof(arr[0]))
 
-#if !defined(XFILES_MALLOC) || !defined(XFILES_FREE)
+#if !defined(XFILES_MALLOC) || !defined(XFILES_REALLOC) || !defined(XFILES_FREE)
 #include <stdlib.h>
-#define XFILES_MALLOC(size) malloc(size)
-#define XFILES_FREE(ptr)    free(ptr)
+#define XFILES_MALLOC(size)       malloc(size)
+#define XFILES_REALLOC(ptr, size) realloc(ptr, size)
+#define XFILES_FREE(ptr)          free(ptr)
 #endif
 
 #ifndef XFILES_ASSERT
@@ -642,6 +643,7 @@ exit:
 #include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/event.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -775,6 +777,335 @@ void xfiles_list(const char* path, void* data, xfiles_list_callback_t* callback)
 
     if (dir)
         closedir(dir);
+}
+
+struct XFWatchHandles
+{
+    int  fd;
+    bool is_dir;
+    // path is stored in stringpool
+    size_t stringpool_offset;
+};
+
+struct XFWatchContext
+{
+    struct kevent*         events; // xarray
+    size_t                 events_len;
+    size_t                 events_cap;
+    struct XFWatchHandles* handles; // xarray
+    size_t                 handles_len;
+    size_t                 handles_cap;
+    char*                  stringpool; // xarray
+    size_t                 stringpool_len;
+    size_t                 stringpool_cap;
+
+    void*                   udata;
+    xfiles_watch_callback_t callback;
+};
+
+static size_t _xfiles_watch_push_string(struct XFWatchContext* ctx, const char* str, size_t len)
+{
+    size_t offset = ctx->stringpool_len;
+    XFILES_ASSERT((offset & 15) == 0);
+
+    size_t nextlen = offset + len + 1;       // +1 for '\0' byte
+    nextlen        = (nextlen + 0xf) & ~0xf; // Round to 16 byte boundary
+    XFILES_ASSERT((nextlen & 15) == 0);
+
+    if (nextlen > ctx->stringpool_cap)
+    {
+        size_t nextcap = nextlen * 2;
+        if (nextcap < 4096) // min cap
+            nextcap = 4096;
+        ctx->stringpool     = XFILES_REALLOC(ctx->stringpool, nextcap);
+        ctx->stringpool_cap = nextcap;
+    }
+    ctx->stringpool_len = nextlen;
+
+    memcpy(ctx->stringpool + offset, str, len);
+    ctx->stringpool[offset + len] = '\0';
+
+    return offset;
+}
+
+void _xfiles_watch_add_listener(struct XFWatchContext* ctx, const char* path_, bool is_dir)
+{
+    struct kevent         event;
+    struct XFWatchHandles wh;
+
+    wh.fd = open(path_, O_EVTONLY);
+    XFILES_ASSERT(wh.fd > 0);
+    if (wh.fd <= 0)
+        return;
+
+    wh.is_dir            = is_dir;
+    wh.stringpool_offset = _xfiles_watch_push_string(ctx, path_, strlen(path_));
+    char* path           = ctx->stringpool + wh.stringpool_offset;
+    XFILES_ASSERT(path >= ctx->stringpool);
+
+    unsigned short flags = EV_ADD | EV_CLEAR;
+    unsigned int fflags  = NOTE_DELETE | NOTE_WRITE | NOTE_EXTEND | NOTE_ATTRIB | NOTE_LINK | NOTE_RENAME | NOTE_REVOKE;
+    event.ident          = wh.fd;
+    event.filter         = EVFILT_VNODE;
+    event.flags          = flags;
+    event.fflags         = fflags;
+    event.data           = 0;
+    // Supposedly you're able to set a ptr here to whatever you want. It appears to be occasionally overwritten by
+    // something in kevent(), so we can't trust it... Unless I'm doing a buffer overrun elsewhere, this is a bug
+    event.udata = path;
+
+    XFILES_ASSERT(ctx->events_len == ctx->handles_len);
+    XFILES_ASSERT(ctx->events_cap == ctx->handles_cap);
+    if (ctx->events_len + 1 > ctx->events_cap)
+    {
+        size_t nextcap = 2 * (ctx->events_len + 1);
+        if (nextcap < 64) // min cap
+            nextcap = 64;
+        ctx->events      = XFILES_REALLOC(ctx->events, sizeof(*ctx->events) * nextcap);
+        ctx->handles     = XFILES_REALLOC(ctx->handles, sizeof(*ctx->handles) * nextcap);
+        ctx->events_cap  = nextcap;
+        ctx->handles_cap = nextcap;
+    }
+    ctx->events[ctx->events_len++]   = event;
+    ctx->handles[ctx->handles_len++] = wh;
+
+    size_t nevents  = ctx->events_len;
+    size_t nfolders = ctx->handles_len;
+    XFILES_ASSERT(nevents == nfolders);
+}
+
+int _xfiles_watch_find_listener_by_string(struct XFWatchContext* ctx, const char* path)
+{
+    int    i;
+    size_t nevents  = ctx->events_len;
+    size_t nfolders = ctx->handles_len;
+    XFILES_ASSERT(nevents == nfolders);
+    for (i = 0; i < nfolders; i++)
+    {
+        struct XFWatchHandles* wh          = ctx->handles + i;
+        const char*            cached_path = ctx->stringpool + wh->stringpool_offset;
+        int                    match       = strcmp(path, cached_path);
+        if (match == 0)
+            return i;
+    }
+    return -1;
+}
+
+int _xfiles_watch_find_listener_by_fd(struct XFWatchContext* ctx, int fd)
+{
+    int    i;
+    size_t nevents  = ctx->events_len;
+    size_t nfolders = ctx->handles_len;
+    XFILES_ASSERT(nevents == nfolders);
+    for (i = 0; i < nfolders; i++)
+    {
+        struct kevent* e = ctx->events + i;
+        if (e->ident == fd)
+            return i;
+    }
+    return -1;
+}
+
+void _xfiles_watch_remove_listener_at_index(struct XFWatchContext* ctx, int i)
+{
+    XFILES_ASSERT(ctx->events_len > 0 && ctx->handles_len > 0);
+    if (i != -1)
+    {
+        struct XFWatchHandles wh   = ctx->handles[i]; // copy data onto stack before deleting
+        const char*           path = ctx->stringpool + wh.stringpool_offset;
+        close(wh.fd);
+
+        XFILES_ASSERT(ctx->events_len == ctx->handles_len);
+        size_t remaining = ctx->events_len - i - 1;
+        if (remaining)
+        {
+            memmove(ctx->events + i, ctx->events + i + 1, sizeof(*ctx->events) * remaining);
+            memmove(ctx->handles + i, ctx->handles + i + 1, sizeof(*ctx->handles) * remaining);
+        }
+        ctx->events_len--;
+        ctx->handles_len--;
+    }
+}
+
+void _xfiles_watch_cb_on_direntry(void* data, const xfiles_list_item_t* item)
+{
+    const char* name    = item->path + item->name_idx;
+    int         match_1 = strcmp(name, ".");
+    int         match_2 = strcmp(name, "..");
+    if (match_1 == 0 || match_2 == 0)
+        return;
+
+    struct XFWatchContext* ctx = data;
+    _xfiles_watch_add_listener(ctx, item->path, item->is_dir);
+
+    if (item->is_dir)
+    {
+        xfiles_list(item->path, ctx, _xfiles_watch_cb_on_direntry);
+    }
+}
+
+void _xfiles_watch_cb_poll_for_new_entries(void* data, const xfiles_list_item_t* item)
+{
+    const char* name    = item->path + item->name_idx;
+    int         match_1 = strcmp(name, ".");
+    int         match_2 = strcmp(name, "..");
+    if (match_1 == 0 || match_2 == 0)
+        return;
+
+    struct XFWatchContext* ctx = data;
+    int                    idx = _xfiles_watch_find_listener_by_string(ctx, item->path);
+    if (idx == -1)
+    {
+        _xfiles_watch_add_listener(ctx, item->path, item->is_dir);
+        ctx->callback(XFILES_WATCH_CREATED, item->path, ctx->udata);
+
+        if (item->is_dir)
+        {
+            xfiles_list(item->path, ctx, _xfiles_watch_cb_poll_for_new_entries);
+        }
+    }
+}
+
+void xfiles_watch(const char* path, unsigned cb_frequency_ms, void* udata, xfiles_watch_callback_t cb)
+{
+    struct XFWatchContext ctx = {0};
+    int                   kq  = 0;
+
+    ctx.udata    = udata;
+    ctx.callback = cb;
+
+    _xfiles_watch_add_listener(&ctx, path, true);
+    xfiles_list(path, &ctx, _xfiles_watch_cb_on_direntry);
+
+    // https://man.freebsd.org/cgi/man.cgi?kqueue
+    // https://www.ipnom.com/FreeBSD-Man-Pages/kqueue.2.html
+    kq = kqueue();
+
+    int loop = 0;
+    do
+    {
+        struct timespec timeout;
+        timeout.tv_sec  = 0;
+        timeout.tv_nsec = cb_frequency_ms * 1000000;
+
+        struct kevent event_data[32] = {0};
+        size_t        nevents        = ctx.events_len;
+        // https://www.ipnom.com/FreeBSD-Man-Pages/kevent.2.html
+        int event_count = kevent(kq, ctx.events, nevents, event_data, XFILES_ARRLEN(event_data), &timeout);
+
+        if ((event_count < 0) || (event_data[0].flags == EV_ERROR))
+            break;
+
+        if (event_count)
+        {
+            for (int i = 0; i < event_count; i++)
+            {
+                // Helpful table pulled from here:
+                // https://github.com/segmentio/fs/blob/main/notify_darwin.go
+                // | Condition                               | Events                   |
+                // | --------------------------------------- | ------------------------ |
+                // | creating a file in a directory          | NOTE_WRITE               |
+                // | creating a directory in a directory     | NOTE_WRITE NOTE_LINK     |
+                // | creating a link in a directory          | NOTE_WRITE               |
+                // | creating a symlink in a directory       | NOTE_WRITE               |
+                // | removing a file from a directory        | NOTE_WRITE               |
+                // | removing a directory from a directory   | NOTE_WRITE NOTE_LINK     |
+                // | renaming a file within a directory      | NOTE_WRITE               |
+                // | renaming a directory within a directory | NOTE_WRITE               |
+                // | moving a file out of a directory        | NOTE_WRITE               |
+                // | moving a directory out of a directory   | NOTE_WRITE NOTE_LINK     |
+                // | writing to a file                       | NOTE_WRITE NOTE_EXTEND   |
+                // | truncating a file                       | NOTE_ATTRIB              |
+                // | overwriting a symlink                   | NOTE_DELETE, NOTE_RENAME |
+
+                // NOTE: The control over the event loop with kevent is nice, but the info returned absolutely sucks.
+                // There is no simple "file created" or "file deleted" event to respond to
+                // If you create a folder in Finder, you get a NOTE_WRITE|NOTE_LINK event
+                // If you move a folder to the Trash, you get a NOTE_WRITE|NOTE_LINK event...?
+                // If you `rm -R` a folder, you get a NOTE_WRITE|NOTE_LINK event, not a NOTE_DELETE event???
+                // kevents are effectively triggers for doing your own polling
+                struct kevent* e = event_data + i;
+                XFILES_ASSERT(e->filter == EVFILT_VNODE);
+
+                int cached_path_idx = _xfiles_watch_find_listener_by_fd(&ctx, e->ident);
+                XFILES_ASSERT(cached_path_idx != -1);
+
+                const struct XFWatchHandles* wh      = ctx.handles + cached_path_idx;
+                const char*                  ev_path = ctx.stringpool + wh->stringpool_offset;
+
+                bool previously_existed = cached_path_idx != -1;
+                bool currently_exists   = xfiles_exists(ev_path);
+
+                // struct XFWatchHandles(*view_folders)[512] = (void*)ctx.handles;
+
+                if (previously_existed && !currently_exists)
+                {
+                    XFILES_ASSERT(_xfiles_watch_find_listener_by_fd(&ctx, e->ident) != -1);
+
+                    // Remove watch listeners for every item in directory & subdirs
+                    if (wh->is_dir)
+                    {
+                        // We don't get "rename" events for deleted/renamed directories contents, so we have to remove
+                        // them from our data structure ourselves
+                        int N = ctx.handles_len;
+                        for (int j = N; j-- > 0;)
+                        {
+                            // if a (directory) is substring of b (subdir or file), remove b
+                            const char* candidate_path = ctx.stringpool + ctx.handles[j].stringpool_offset;
+                            const char* a              = ev_path;
+                            const char* b              = candidate_path;
+                            while (*a == *b && *a != 0 && *b != 0)
+                            {
+                                a++;
+                                b++;
+                            }
+
+                            bool is_substring = *a == 0 && *b != 0;
+                            if (is_substring) // must be child directory or file
+                            {
+                                XFILES_ASSERT(!xfiles_exists(candidate_path));
+                                _xfiles_watch_remove_listener_at_index(&ctx, j);
+                                ctx.callback(XFILES_WATCH_DELETED, candidate_path, ctx.udata);
+                            }
+                        }
+                    } // !is_dir
+                    _xfiles_watch_remove_listener_at_index(&ctx, cached_path_idx);
+                    ctx.callback(XFILES_WATCH_DELETED, ev_path, ctx.udata);
+                }
+
+                if (previously_existed && currently_exists)
+                {
+                    if (e->fflags & NOTE_WRITE)
+                    {
+                        ctx.callback(XFILES_WATCH_MODIFIED, ev_path, ctx.udata);
+
+                        // Dir was modified. A new file may have been added
+                        if (wh->is_dir)
+                            xfiles_list(ev_path, &ctx, _xfiles_watch_cb_poll_for_new_entries);
+                    }
+                    // if (e->fflags & NOTE_ATTRIB) // do we need an attrib event?
+                    //     ctx.callback(XFILES_WATCH_MODIFIED, ev_path, ctx.udata);
+                }
+            }
+        }
+
+        loop = ctx.callback(XFILES_WATCH_CONTINUE, "", ctx.udata);
+    }
+    while (loop);
+
+    close(kq);
+
+    size_t nevents  = ctx.events_len;
+    size_t nfolders = ctx.handles_len;
+    XFILES_ASSERT(nevents == nfolders);
+    for (int i = nevents; i-- > 0;)
+    {
+        const char* path = ctx.stringpool + ctx.handles[i].stringpool_offset;
+        _xfiles_watch_remove_listener_at_index(&ctx, i);
+    }
+    XFILES_FREE(ctx.events);
+    XFILES_FREE(ctx.handles);
+    XFILES_FREE(ctx.stringpool);
 }
 
 #ifdef __OBJC__
