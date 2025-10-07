@@ -18,6 +18,8 @@
  * Windows support file paths with names up to 32,767 wide characters. This library lazily supports a maximum of
  * MAX_PATH (260) wide characters using stack memory to avoid using malloc or similar. If you need longer paths, you
  * will have to add this yourself!
+ * From what I've read around the internet, Windows File Explorer still doesn't support long paths. This may change in
+ * future.
  * https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file#maximum-path-length-limitation
  *
  * BUILDING:
@@ -149,6 +151,21 @@ typedef struct xfiles_list_item_t
 typedef void(xfiles_list_callback_t)(void* data, const xfiles_list_item_t* item);
 // Calls the above callback for each item in a directory
 void xfiles_list(const char* path, void* data, xfiles_list_callback_t* cb);
+
+enum XFILES_WATCH_TYPE
+{
+    XFILES_WATCH_CONTINUE,
+    XFILES_WATCH_CREATED,
+    XFILES_WATCH_DELETED,
+    XFILES_WATCH_MODIFIED,
+};
+// If type == CONTINUE, return zero to exit from xfiles_watch()
+typedef int (*xfiles_watch_callback_t)(enum XFILES_WATCH_TYPE type, const char* path, void* udata);
+// Watch a directory and all subdirs for file & folder changes.
+// Blocking call. Doesn't create any threads.
+// macOS implementation will allocate memory. Windows implementation doesn't.
+// cb_frequency_ms = approx wait time in milliseconds between polling for file events. eg. 50 ms
+void xfiles_watch(const char* path, unsigned cb_frequency_ms, void* udata, xfiles_watch_callback_t cb);
 
 #ifdef __cplusplus
 }
@@ -511,6 +528,111 @@ void xfiles_list(const char* path, void* data, xfiles_list_callback_t* callback)
 
     if (hFind != INVALID_HANDLE_VALUE)
         FindClose(hFind);
+}
+
+void xfiles_watch(const char* path, unsigned cb_frequency_ms, void* udata, xfiles_watch_callback_t cb)
+{
+    HANDLE hDirectory;
+    // https://learn.microsoft.com/en-us/windows/win32/api/minwinbase/ns-minwinbase-overlapped
+    OVERLAPPED overlapped;
+
+    int pathlen = strlen(path);
+    // Remove backslash
+    if (pathlen > 0 && (path[pathlen - 1] == '\\' || path[pathlen - 1] == '/'))
+        pathlen--;
+
+    {
+        WCHAR wPath[MAX_PATH];
+        int   num = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, pathlen, wPath, XFILES_ARRLEN(wPath));
+        XFILES_ASSERT(num);
+
+        hDirectory = CreateFileW(
+            wPath,
+            FILE_LIST_DIRECTORY,
+            FILE_SHARE_READ,
+            NULL,
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED,
+            NULL);
+        XFILES_ASSERT(hDirectory != INVALID_HANDLE_VALUE);
+        if (hDirectory == INVALID_HANDLE_VALUE)
+            return;
+    }
+
+    overlapped.hEvent = CreateEventW(NULL, FALSE, 0, NULL);
+    XFILES_ASSERT(overlapped.hEvent);
+
+    int loop = 0;
+    do
+    {
+        BYTE buffer[1024 * 4];
+        // https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-readdirectorychangesw
+        BOOL success = ReadDirectoryChangesW(
+            hDirectory,
+            buffer,
+            sizeof(buffer),
+            TRUE,
+            FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME |
+                // FILE_NOTIFY_CHANGE_ATTRIBUTES |
+                FILE_NOTIFY_CHANGE_LAST_WRITE,
+            NULL,
+            &overlapped,
+            NULL);
+        XFILES_ASSERT(success);
+        if (!success)
+            goto exit;
+
+        DWORD result = WaitForSingleObject(overlapped.hEvent, cb_frequency_ms);
+        if (result == WAIT_OBJECT_0)
+        {
+            DWORD dwNumberOfBytesTransferred = 0;
+            GetOverlappedResult(hDirectory, &overlapped, &dwNumberOfBytesTransferred, TRUE);
+
+            DWORD dwOffset = 0;
+            while (dwOffset < dwNumberOfBytesTransferred)
+            {
+                FILE_NOTIFY_INFORMATION* pNotify = (FILE_NOTIFY_INFORMATION*)(buffer + dwOffset);
+
+                enum XFILES_WATCH_TYPE type = 0;
+                if (pNotify->Action == FILE_ACTION_ADDED)
+                    type = XFILES_WATCH_CREATED;
+                if (pNotify->Action == FILE_ACTION_REMOVED)
+                    type = XFILES_WATCH_DELETED;
+                if (pNotify->Action == FILE_ACTION_MODIFIED)
+                    type = XFILES_WATCH_MODIFIED;
+
+                if (type)
+                {
+                    char fp[MAX_PATH];
+                    int  NameLength = pNotify->FileNameLength / sizeof(wchar_t);
+
+                    int fplen  = snprintf(fp, sizeof(fp), "%.*s" XFILES_DIR_STR, pathlen, path);
+                    fplen     += WideCharToMultiByte(
+                        CP_UTF8,
+                        WC_ERR_INVALID_CHARS,
+                        pNotify->FileName,
+                        NameLength,
+                        fp + fplen,
+                        sizeof(fp) - fplen,
+                        NULL,
+                        NULL);
+
+                    cb(type, fp, udata);
+                }
+
+                dwOffset += pNotify->NextEntryOffset;
+                if (pNotify->NextEntryOffset == 0)
+                    break;
+            }
+        }
+
+        loop = cb(XFILES_WATCH_CONTINUE, "", udata);
+    }
+    while (loop);
+
+exit:
+    CloseHandle(overlapped.hEvent);
+    CloseHandle(hDirectory);
 }
 
 #endif // _WIN32
