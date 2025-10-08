@@ -75,6 +75,9 @@ void init_gui(GUI* gui)
     xcomp_add_child(&gui->root.top, &gui->root.child_btn1);
     gui->child_btn1.event_handler = handle_events_btn1;
     gui->child_btn1.data = gui;
+
+#define ARRLEN(arr) (sizeof(arr) / sizeof(arr[0]))
+    assert(gui->root.top.num_children == ARRLEN(gui->root.children));
 }
 // os_window_events.c
 ...
@@ -97,11 +100,13 @@ xassert(2 + 2 == 5); // pause
 
 ### [files.h](include/xhl/files.h)
 
-Imperitive file reading & writing. Paths are expected to be UTF8. Handles platform specific conversions
+Imperitive file reading & writing. Paths are expected to be UTF8. Handles platform specific conversions.
+
+Includes some nice features like listing a folders contents (can easily be made recursive), and watching for changes in a folder
 
 ```c
 // Build file path (no allocs!)
-char path[1024];
+char path[1024] = {0};
 static const char* filename = XFILES_DIR_STR "file.txt"; // Win \\file.txt, Posix /file.txt
 xfiles_get_user_directory(path, sizeof(path), XFILES_USER_DIRECTORY_DESKTOP);
 strncat(path, filename, sizeof(path) - strlen(path) - 1);

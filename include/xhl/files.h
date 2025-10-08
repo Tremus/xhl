@@ -18,9 +18,21 @@
  * Windows support file paths with names up to 32,767 wide characters. This library lazily supports a maximum of
  * MAX_PATH (260) wide characters using stack memory to avoid using malloc or similar. If you need longer paths, you
  * will have to add this yourself!
- * From what I've read around the internet, Windows File Explorer still doesn't support long paths. This may change in
- * future.
+ * From what I've read around the internet, Windows File Explorer still doesn't support long paths. Users of your
+ * software likely won't have or need any long paths. This may change in future.
  * https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file#maximum-path-length-limitation
+ *
+ * FEATURES:
+ * - file read/write/append
+ * - file/folder exists Y/N
+ * - file/folder rename/move
+ * - folder create
+ * - file/folder move to bin
+ * - file/folder delete
+ * - open folders in Finder/Explorer (opt. with preselected file/folder)
+ * - folder scan. Useful for custom search algorithms
+ * - get platform specific paths eg. \AppData\, /Application Support/, {user}/Desktop, etc.
+ * - file watching. Useful for devtools like recompiling code on change, or maintaining an accurate file tree
  *
  * BUILDING:
  * Simply #define XHL_FILES_IMPL in one of your build targets before including this header
@@ -34,6 +46,92 @@
  * Randy Gaul. 'xfiles_list' is a modified version of 'cf_scan' from the cute_files library
  * https://github.com/RandyGaul/cute_headers_deprecated/blob/master/cute_files.h
  */
+
+// Example program 1: File watching
+#if 0
+#define XHL_FILES_IMPL
+
+#include <signal.h>
+#include <stdio.h>
+#include <xhl/files.h>
+
+int  g_running = 1;
+void ctrl_c_callback(int code)
+{
+    fprintf(stderr, "Terminating\n");
+    g_running = 0;
+}
+
+int my_cb(enum XFILES_WATCH_TYPE type, const char* path, void* udata)
+{
+    switch (type)
+    {
+    case XFILES_WATCH_CONTINUE:
+        fprintf(stderr, "Continue %s\n", path);
+        break;
+    case XFILES_WATCH_CREATED:
+        fprintf(stderr, "Created %s\n", path);
+        break;
+    case XFILES_WATCH_DELETED:
+        fprintf(stderr, "Deleted %s\n", path);
+        break;
+    case XFILES_WATCH_MODIFIED:
+        fprintf(stderr, "Modified %s\n", path);
+        // Recompile program?
+        // Recompile shader?
+        // Note that if you are modifying files in an IDE with a linter for formatter, you will likely get multiple
+        // 'modified' callbacks. If you're hoping to recompile code, you may want to write your own throttle for
+        // whatever actions you make in response
+        break;
+    }
+    return g_running;
+}
+
+int main()
+{
+    fprintf(stderr, "Press Crtl+C to exit\n");
+    g_running = 1;
+    signal(SIGINT, ctrl_c_callback);
+
+    xfiles_watch("/path/to/directory", 50, NULL, my_cb);
+
+    return 0;
+}
+#endif // Example program 1: File watching
+
+// Example program 2: Recursive file searching
+#if 0
+#define XHL_FILES_IMPL
+#include <stdio.h>
+#include <xhl/files.h>
+
+void my_cb(void* data, const xfiles_list_item_t* item)
+{
+    const char* name = item->path + item->name_idx;
+    if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0)
+        return;
+
+    fprintf(stderr, "Entry: %s\n", item->path);
+    if (item->is_dir)
+    {
+        xfiles_list(item->path, data, my_cb);
+    }
+    else
+    {
+        int* p_file_counter = data;
+        (*p_file_counter)++;
+    }
+}
+
+int main()
+{
+    int file_counter = 0;
+    xfiles_list("/path/to/directory", &file_counter, my_cb);
+    fprintf(stderr, "Found %d files\n", file_counter);
+    return 0;
+}
+#endif // Example program 2: Recursive file searching
+
 #ifndef XHL_FILES_H
 #define XHL_FILES_H
 
@@ -124,7 +222,7 @@ enum XFILES_USER_DIRECTORY
     // Windows: {letter}:\\Users\\{username}
     // macOS: /Users/{username}
     XFILES_USER_DIRECTORY_HOME,
-    // Windows: [HOME]\\AppData\Roaming
+    // Windows: [HOME]\\AppData\\Roaming
     // macOS: [HOME]/Library/Application\ Support
     XFILES_USER_DIRECTORY_APPDATA,
     XFILES_USER_DIRECTORY_DESKTOP,
