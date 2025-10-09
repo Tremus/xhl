@@ -1197,10 +1197,7 @@ void xfiles_watch(const char* path, unsigned cb_frequency_ms, void* udata, xfile
     size_t nfolders = ctx.handles_len;
     XFILES_ASSERT(nevents == nfolders);
     for (int i = nevents; i-- > 0;)
-    {
-        const char* path = ctx.stringpool + ctx.handles[i].stringpool_offset;
         _xfiles_watch_remove_listener_at_index(&ctx, i);
-    }
     XFILES_FREE(ctx.events);
     XFILES_FREE(ctx.handles);
     XFILES_FREE(ctx.stringpool);
