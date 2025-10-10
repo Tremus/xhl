@@ -1069,6 +1069,8 @@ void xfiles_watch(const char* path, unsigned cb_frequency_ms, void* udata, xfile
     struct XFWatchContext ctx = {0};
     int                   kq  = 0;
 
+    XFILES_ASSERT(cb); // Did you forget to write a callback?
+
     ctx.udata    = udata;
     ctx.callback = cb;
 
