@@ -641,7 +641,7 @@ void xfiles_watch(const char* path, unsigned cb_frequency_ms, void* udata, xfile
         pathlen--;
 
     {
-        WCHAR wPath[MAX_PATH];
+        WCHAR wPath[MAX_PATH] = {0};
         int   num = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, pathlen, wPath, XFILES_ARRLEN(wPath));
         XFILES_ASSERT(num);
 
