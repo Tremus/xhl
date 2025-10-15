@@ -30,18 +30,55 @@ void  xvfree(void* ptr, size_t size);
 #include <errno.h>
 #include <stdlib.h>
 
-#ifndef NDEBUG
+#ifdef NDEBUG
+#define xalloc_assert(...)
+#else // !NDEBUG
+
 #ifdef _WIN32
 #define xalloc_assert(cond) (cond) ? (void)0 : __debugbreak()
 #else
 #define xalloc_assert(cond) (cond) ? (void)0 : __builtin_debugtrap()
 #endif
+
 // Not recommended for debugging in multi-instance & multi-threaded contexts.
 int g_num_xmallocs = 0;
 int g_num_xvallocs = 0;
-#else
-#define xalloc_assert(...)
+
+#ifndef XALLOC_ALLOC_ARRAY_SIZE
+#define XALLOC_ALLOC_ARRAY_SIZE 1024
 #endif
+void* g_current_allocs[XALLOC_ALLOC_ARRAY_SIZE] = {0};
+
+int xalloc_add_alloc(void* ptr)
+{
+    xalloc_assert(ptr);
+    for (int i = 0; i < XALLOC_ALLOC_ARRAY_SIZE; i++)
+    {
+        if (g_current_allocs[i] == NULL)
+        {
+            g_current_allocs[i] = ptr;
+            return i;
+        }
+    }
+    xalloc_assert(0); // Oh no, you've run out of room. Increase the array size or rethink your program (>1000 allocs!?)
+    return -1;
+}
+int xalloc_remove_alloc(void* ptr)
+{
+    xalloc_assert(ptr);
+    for (int i = 0; i < XALLOC_ALLOC_ARRAY_SIZE; i++)
+    {
+        if (g_current_allocs[i] == ptr)
+        {
+            g_current_allocs[i] = 0;
+            return i;
+        }
+    }
+    xalloc_assert(0); // Does not exist. Double free?
+    return -1;
+}
+
+#endif // NDEBUG
 
 void xalloc_init()
 {
@@ -62,34 +99,40 @@ void xalloc_shutdown()
 void* xmalloc(size_t size)
 {
     void* ptr = malloc(size);
-    if (ptr == NULL)
-        exit(ENOMEM);
 #ifndef NDEBUG
+    xalloc_add_alloc(ptr);
     g_num_xmallocs++;
 #endif
+    if (ptr == NULL)
+        exit(ENOMEM);
     return ptr;
 }
 
 void* xrealloc(void* ptr, size_t new_size)
 {
     void* new_ptr = realloc(ptr, new_size);
-    if (new_ptr == NULL)
-        exit(ENOMEM);
 #ifndef NDEBUG
+    if (ptr && ptr != new_ptr)
+        xalloc_remove_alloc(ptr);
+    if (new_ptr)
+        xalloc_add_alloc(new_ptr);
     if (ptr == NULL && new_size > 0)
         g_num_xmallocs++;
 #endif
+    if (new_ptr == NULL)
+        exit(ENOMEM);
     return new_ptr;
 }
 
 void* xcalloc(size_t num, size_t size)
 {
     void* ptr = calloc(num, size);
-    if (ptr == NULL)
-        exit(ENOMEM);
 #ifndef NDEBUG
+    xalloc_add_alloc(ptr);
     g_num_xmallocs++;
 #endif
+    if (ptr == NULL)
+        exit(ENOMEM);
     return ptr;
 }
 
@@ -99,6 +142,7 @@ void xfree(void* ptr)
     {
         free(ptr);
 #ifndef NDEBUG
+        xalloc_remove_alloc(ptr);
         g_num_xmallocs--;
         xalloc_assert(g_num_xmallocs >= 0);
 #endif
