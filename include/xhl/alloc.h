@@ -20,6 +20,14 @@ void  xfree(void*);
 void* xvalloc(void* hint, size_t size);
 void  xvfree(void* ptr, size_t size);
 
+// On windows this returns SYSTEM_INFO.dwAllocationGranularity (usually 64kB) and SYSTEM_INFO.dwPageSize (usually 4kb).
+// If you want hinting to work with VirtualAlloc(), your hint must be aligned to this.
+// https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/ns-sysinfoapi-system_info
+// On macOS this returns getpagesize(), although mmap() on macOS will let you hint using 4kb alignment, and rounds up
+// https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/mmap.2.html
+// Both arguments are optional, you may pass NULL
+void xvalloc_info(size_t* valloc_granularity, size_t* page_size);
+
 #ifdef __cplusplus
 }
 #endif
@@ -176,6 +184,23 @@ void xvfree(void* ptr, size_t size)
     DWORD err = GetLastError();
 #endif
     xalloc_assert(ok);
+}
+
+void xvalloc_info(size_t* _valloc_granularity, size_t* _page_size)
+{
+    static DWORD AllocationGranularity = 0;
+    static DWORD PageSize              = 0;
+    if (!AllocationGranularity)
+    {
+        SYSTEM_INFO SystemInfo;
+        GetSystemInfo(&SystemInfo);
+        AllocationGranularity = SystemInfo.dwAllocationGranularity;
+        PageSize              = SystemInfo.dwPageSize;
+    }
+    if (_valloc_granularity)
+        *_valloc_granularity = AllocationGranularity;
+    if (_page_size)
+        *_valloc_granularity = PageSize;
 }
 
 #else // !_WIN32
