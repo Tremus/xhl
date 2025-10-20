@@ -207,6 +207,7 @@ void xvalloc_info(size_t* _valloc_granularity, size_t* _page_size)
 
 #ifdef __APPLE__
 #include <sys/mman.h>
+#include <unistd.h>
 #else
 #error Unknown unix
 #endif
@@ -229,6 +230,20 @@ void xvfree(void* ptr, size_t size)
     g_num_xvallocs--;
     xalloc_assert(g_num_xvallocs >= 0);
 #endif
+}
+
+void xvalloc_info(size_t* _valloc_granularity, size_t* _page_size)
+{
+    static int page_size = 0;
+    if (!page_size)
+    {
+        // https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man3/getpagesize.3.html
+        page_size = getpagesize();
+    }
+    if (_valloc_granularity)
+        *_valloc_granularity = page_size;
+    if (_page_size)
+        *_page_size = page_size;
 }
 
 #endif
