@@ -6,6 +6,7 @@ Stands for:
 -   xtendable header libraries
 -   sexy header libraries
 -   extreme header libraries
+-   xhl header libraries
 
 [STB-Style](https://github.com/nothings/stb/blob/master/docs/stb_howto.txt) headers
 
