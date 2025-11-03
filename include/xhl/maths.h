@@ -97,9 +97,9 @@ xm_complexf xm_ctanhf(float re, float im);
 // Rough benchmarks & margins of error were recorded for several of the following functions
 // Find them here: https://github.com/Tremus/fastmaths
 
-float xm_fastsin(float x);
-float xm_fastcos(float x);
-float xm_fasttan(float x);
+static float xm_fastsin(float x);
+static float xm_fastcos(float x);
+static float xm_fasttan(float x);
 
 float xm_fastersin(float x);
 float xm_fastersinfull(float x);
@@ -176,6 +176,43 @@ uint32_t xm_popcountull(uint64_t x);
 uint32_t xm_xorshift32(uint32_t x);
 uint64_t xm_xorshift64(uint64_t x);
 
+typedef union xm_fi32
+{
+    float    f;
+    int32_t  i32;
+    uint32_t u32;
+} xm_fi32;
+
+/*>>>>>>>>>>>>>>>>>>>>>>>>>
+ > Inline Implementations >
+ >>>>>>>>>>>>>>>>>>>>>>>>*/
+
+float xm_fastsin(float x)
+{
+    static const float fouroverpi   = 1.2732395447351627f;
+    static const float fouroverpisq = 0.40528473456935109f;
+    static const float q            = 0.78444488374548933f;
+
+    xm_fi32  p    = {.f = 0.20363937680730309f};
+    xm_fi32  r    = {.f = 0.015124940802184233f};
+    xm_fi32  s    = {.f = -0.0032225901625579573f};
+    xm_fi32  vx   = {.f = x};
+    uint32_t sign = vx.u32 & 0x80000000;
+    vx.u32        = vx.u32 & 0x7FFFFFFF;
+
+    float qpprox   = fouroverpi * x - fouroverpisq * x * vx.f;
+    float qpproxsq = qpprox * qpprox;
+
+    p.u32 |= sign;
+    r.u32 |= sign;
+    s.u32 ^= sign;
+
+    return q * qpprox + qpproxsq * (p.f + qpproxsq * (r.f + qpproxsq * s.f));
+}
+
+float xm_fastcos(float x) { return xm_fastsin(x + ((x > XM_HALF_PIf) ? (XM_HALF_PIf - XM_TAUf) : XM_HALF_PIf)); }
+float xm_fasttan(float x) { return xm_fastsin(x) / xm_fastsin(x + XM_HALF_PIf); }
+
 #ifdef __cplusplus
 }
 #endif
@@ -185,14 +222,6 @@ uint64_t xm_xorshift64(uint64_t x);
 #ifdef XHL_MATHS_IMPL
 #undef XHL_MATHS_IMPL
 #include <math.h>
-
-union xm_fi32
-{
-    float    f;
-    int32_t  i32;
-    uint32_t u32;
-};
-typedef union xm_fi32 xm_fi32;
 
 // https://stackoverflow.com/a/429812
 int xm_droundi(double d)
@@ -344,32 +373,6 @@ xm_complexf xm_ctanhf(float re, float im)
     d = xm_ccoshf(re, im);
     return xm_cdivf(n.re, n.im, d.re, d.im);
 }
-
-float xm_fastsin(float x)
-{
-    static const float fouroverpi   = 1.2732395447351627f;
-    static const float fouroverpisq = 0.40528473456935109f;
-    static const float q            = 0.78444488374548933f;
-
-    xm_fi32  p    = {.f = 0.20363937680730309f};
-    xm_fi32  r    = {.f = 0.015124940802184233f};
-    xm_fi32  s    = {.f = -0.0032225901625579573f};
-    xm_fi32  vx   = {.f = x};
-    uint32_t sign = vx.u32 & 0x80000000;
-    vx.u32        = vx.u32 & 0x7FFFFFFF;
-
-    float qpprox   = fouroverpi * x - fouroverpisq * x * vx.f;
-    float qpproxsq = qpprox * qpprox;
-
-    p.u32 |= sign;
-    r.u32 |= sign;
-    s.u32 ^= sign;
-
-    return q * qpprox + qpproxsq * (p.f + qpproxsq * (r.f + qpproxsq * s.f));
-}
-
-float xm_fastcos(float x) { return xm_fastsin(x + ((x > XM_HALF_PIf) ? (XM_HALF_PIf - XM_TAUf) : XM_HALF_PIf)); }
-float xm_fasttan(float x) { return xm_fastsin(x) / xm_fastsin(x + XM_HALF_PIf); }
 
 // Paul Minieros fastersin
 float xm_fastersin(float x)
