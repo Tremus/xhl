@@ -130,11 +130,11 @@ float xm_fasterlog(float a);
 // ~12x faster than log10f. Lacks much precision
 float xm_fasterlog10(float a);
 // Inputs less than -87 will break
-float xm_fastexp(float x);
-float xm_fasterexp(float x);
+static float xm_fastexp(float x);
+float        xm_fasterexp(float x);
 // Only ~10% faster than exp2f. Barely less accurate
-float xm_fastexp2(float p);
-float xm_fastpow(float a, float b);
+static float xm_fastexp2(float p);
+float        xm_fastpow(float a, float b);
 
 /*@*@*@*@*
  @ Fancy @
@@ -212,6 +212,22 @@ float xm_fastsin(float x)
 
 float xm_fastcos(float x) { return xm_fastsin(x + ((x > XM_HALF_PIf) ? (XM_HALF_PIf - XM_TAUf) : XM_HALF_PIf)); }
 float xm_fasttan(float x) { return xm_fastsin(x) / xm_fastsin(x + XM_HALF_PIf); }
+
+// Paul Mineiro's exp2(log2(e))
+// https://github.com/romeric/fastapprox/blob/master/fastapprox/src/fastexp.h
+float xm_fastexp(float x) { return xm_fastexp2(x * 1.442695040f); }
+// Paul Mineiro's exp2
+// https://github.com/romeric/fastapprox/blob/master/fastapprox/src/fastexp.h
+float xm_fastexp2(float p)
+{
+    float offset = (p < 0) ? 1.0f : 0.0f;
+    // float clipp  = (p < -126) ? -126.0f : p;
+    int     w = (int)p;
+    float   z = p - w + offset;
+    xm_fi32 v = {.u32 = (uint32_t)((1 << 23) * (p + 121.2740575f + 27.7280233f / (4.84252568f - z) - 1.49012907f * z))};
+
+    return v.f;
+}
 
 #ifdef __cplusplus
 }
@@ -498,9 +514,6 @@ float xm_fasterlog10(float a)
     return (u.i32 - 1064866805) * 3.5885572395641675e-8f; /* 1 / 12102203.0; */
 }
 
-// Paul Mineiro's exp2(log2(e))
-// https://github.com/romeric/fastapprox/blob/master/fastapprox/src/fastexp.h
-float xm_fastexp(float x) { return xm_fastexp2(x * 1.442695040f); }
 float xm_fasterexp(float x)
 {
     // p. mineiros faster exp
@@ -512,19 +525,6 @@ float xm_fasterexp(float x)
     // https://github.com/ekmett/approximate/blob/master/cbits/fast.c
     xm_fi32 u = {.i32 = (int32_t)(12102203.0f * x + 1065353217.0f)};
     return u.f;
-}
-
-// Paul Mineiro's exp2
-// https://github.com/romeric/fastapprox/blob/master/fastapprox/src/fastexp.h
-float xm_fastexp2(float p)
-{
-    float offset = (p < 0) ? 1.0f : 0.0f;
-    // float clipp  = (p < -126) ? -126.0f : p;
-    int     w = (int)p;
-    float   z = p - w + offset;
-    xm_fi32 v = {.u32 = (uint32_t)((1 << 23) * (p + 121.2740575f + 27.7280233f / (4.84252568f - z) - 1.49012907f * z))};
-
-    return v.f;
 }
 
 // ekmett powf_fast
