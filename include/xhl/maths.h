@@ -120,11 +120,11 @@ float xm_fastcsch(float x);
 float xm_fastatan(float x);
 float xm_fastatan2(float y, float x);
 
-float xm_fastlog(float a);
+static float xm_fastlog(float a);
 // ~6x faster than log2f
-float xm_fastlog2(float a);
+static float xm_fastlog2(float a);
 // ~6.6x faster than log10f
-float xm_fastlog10(float x);
+static float xm_fastlog10(float x);
 
 float xm_fasterlog(float a);
 // ~12x faster than log10f. Lacks much precision
@@ -143,8 +143,8 @@ float        xm_fastpow(float a, float b);
 // Convert a midi value (0-127) to Hz. Assumes A440
 float xm_midi_to_Hz(float midi);
 // Accurate to ~0.0005 dB
-float xm_fast_gain_to_dB(float gain);
-float xm_fast_dB_to_gain(float dB);
+static float xm_fast_gain_to_dB(float gain);
+static float xm_fast_dB_to_gain(float dB);
 // Denormalise to 20Hz-20kHz
 // Perfect at low and mid ranges. 0.15Hz error margin close to 20kHz
 float xm_fast_denomalise_Hz(float norm);
@@ -228,6 +228,35 @@ float xm_fastexp2(float p)
 
     return v.f;
 }
+
+float xm_fastlog(float x) { return xm_fastlog2(x) * XM_LN2f; }
+
+float xm_fastlog2(float x)
+{
+    xm_fi32 vx = {.f = x};
+    xm_fi32 mx = {.u32 = (vx.u32 & 0x007FFFFF) | 0x3f000000};
+    float   y  = vx.u32;
+
+    y *= 1.1920928955078125e-7f;
+
+    return y - 124.22551499f - 1.498030302f * mx.f - 1.72587999f / (0.3520887068f + mx.f);
+}
+
+// Adapted from Paul Mineiro log2
+// https://github.com/romeric/fastapprox/blob/master/fastapprox/src/fastlog.h
+float xm_fastlog10(float x)
+{
+    xm_fi32 vx = {.f = x};
+    xm_fi32 mx = {.u32 = (vx.u32 & 0x007FFFFF) | 0x3f000000};
+    float   y  = vx.u32;
+
+    y *= 3.588557191657796e-8f;
+
+    return y - 37.39560623879553f - 0.4509520553155725f * mx.f - 0.5195416459062518f / (0.3520887068f + mx.f);
+}
+
+float xm_fast_dB_to_gain(float dB) { return xm_fastexp2(dB * 0.166666667f); }
+float xm_fast_gain_to_dB(float gain) { return 20.0f * xm_fastlog10(gain); }
 
 #ifdef __cplusplus
 }
@@ -471,32 +500,6 @@ float xm_fastatan2(float y, float x)
     return res;
 }
 
-float xm_fastlog(float x) { return xm_fastlog2(x) * XM_LN2f; }
-
-float xm_fastlog2(float x)
-{
-    xm_fi32 vx = {.f = x};
-    xm_fi32 mx = {.u32 = (vx.u32 & 0x007FFFFF) | 0x3f000000};
-    float   y  = vx.u32;
-
-    y *= 1.1920928955078125e-7f;
-
-    return y - 124.22551499f - 1.498030302f * mx.f - 1.72587999f / (0.3520887068f + mx.f);
-}
-
-// Adapted from Paul Mineiro log2
-// https://github.com/romeric/fastapprox/blob/master/fastapprox/src/fastlog.h
-float xm_fastlog10(float x)
-{
-    xm_fi32 vx = {.f = x};
-    xm_fi32 mx = {.u32 = (vx.u32 & 0x007FFFFF) | 0x3f000000};
-    float   y  = vx.u32;
-
-    y *= 3.588557191657796e-8f;
-
-    return y - 37.39560623879553f - 0.4509520553155725f * mx.f - 0.5195416459062518f / (0.3520887068f + mx.f);
-}
-
 // Blazing fast but lacks precision
 // https://github.com/ekmett/approximate/blob/master/cbits/fast.c
 /* 1065353216 - 486411 = 1064866805 */
@@ -536,8 +539,6 @@ float xm_fastpow(float a, float b)
     return u.f;
 }
 
-float xm_fast_gain_to_dB(float gain) { return 20.0f * xm_fastlog10(gain); }
-
 float xm_fast_denomalise_Hz(float norm) { return 20 * xm_fastexp2(norm * 10); }
 
 // Adapted from the ankerl & ekmett fast log algorithms
@@ -564,8 +565,6 @@ float xm_midi_to_Hz(float midi)
     // Ceiling of 20kHz. Removing the following line can break filters and cause infinity errors
     return Hz > 20000.0f ? 20000.0f : Hz;
 }
-
-float xm_fast_dB_to_gain(float dB) { return xm_fastexp2(dB * 0.166666667); }
 
 uint64_t xm_align_up(uint64_t value, uint64_t alignment)
 {
