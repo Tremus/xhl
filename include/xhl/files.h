@@ -253,18 +253,18 @@ void xfiles_list(const char* path, void* data, xfiles_list_callback_t* cb);
 
 enum XFILES_WATCH_TYPE
 {
-    XFILES_WATCH_CONTINUE,
     XFILES_WATCH_CREATED,
     XFILES_WATCH_DELETED,
     XFILES_WATCH_MODIFIED,
 };
-// If type == CONTINUE, return zero to exit from xfiles_watch()
 typedef int (*xfiles_watch_callback_t)(enum XFILES_WATCH_TYPE type, const char* path, void* udata);
-// Watch a directory and all subdirs for file & folder changes.
-// Blocking call. Doesn't create any threads.
-// macOS implementation will allocate memory. Windows implementation doesn't.
-// cb_frequency_ms = approx wait time in milliseconds between polling for file events. eg. 50 ms
-void xfiles_watch(const char* path, unsigned cb_frequency_ms, void* udata, xfiles_watch_callback_t cb);
+typedef void* xfiles_watch_context_t;
+
+// Sets up an event queue for file change notifications
+xfiles_watch_context_t xfiles_watch_create(const char* path, void* udata, xfiles_watch_callback_t cb);
+// Process all events in the queue
+void xfiles_watch_flush(xfiles_watch_context_t ctx);
+void xfiles_watch_destroy(xfiles_watch_context_t ctx);
 
 #ifdef __cplusplus
 }
@@ -887,13 +887,15 @@ struct XFWatchHandles
 
 struct XFWatchContext
 {
-    struct kevent*         events; // xarray
-    size_t                 events_len;
-    size_t                 events_cap;
-    struct XFWatchHandles* handles; // xarray
+    int kq;
+
+    struct kevent*         changelist;
+    size_t                 changelist_len;
+    size_t                 changelist_cap;
+    struct XFWatchHandles* handles;
     size_t                 handles_len;
     size_t                 handles_cap;
-    char*                  stringpool; // xarray
+    char*                  stringpool;
     size_t                 stringpool_len;
     size_t                 stringpool_cap;
 
@@ -952,22 +954,22 @@ void _xfiles_watch_add_listener(struct XFWatchContext* ctx, const char* path_, b
     // something in kevent(), so we can't trust it... Unless I'm doing a buffer overrun elsewhere, this is a bug
     event.udata = path;
 
-    XFILES_ASSERT(ctx->events_len == ctx->handles_len);
-    XFILES_ASSERT(ctx->events_cap == ctx->handles_cap);
-    if (ctx->events_len + 1 > ctx->events_cap)
+    XFILES_ASSERT(ctx->changelist_len == ctx->handles_len);
+    XFILES_ASSERT(ctx->changelist_cap == ctx->handles_cap);
+    if (ctx->changelist_len + 1 > ctx->changelist_cap)
     {
-        size_t nextcap = 2 * (ctx->events_len + 1);
+        size_t nextcap = 2 * (ctx->changelist_len + 1);
         if (nextcap < 64) // min cap
             nextcap = 64;
-        ctx->events      = XFILES_REALLOC(ctx->events, sizeof(*ctx->events) * nextcap);
-        ctx->handles     = XFILES_REALLOC(ctx->handles, sizeof(*ctx->handles) * nextcap);
-        ctx->events_cap  = nextcap;
-        ctx->handles_cap = nextcap;
+        ctx->changelist     = XFILES_REALLOC(ctx->changelist, sizeof(*ctx->changelist) * nextcap);
+        ctx->handles        = XFILES_REALLOC(ctx->handles, sizeof(*ctx->handles) * nextcap);
+        ctx->changelist_cap = nextcap;
+        ctx->handles_cap    = nextcap;
     }
-    ctx->events[ctx->events_len++]   = event;
-    ctx->handles[ctx->handles_len++] = wh;
+    ctx->changelist[ctx->changelist_len++] = event;
+    ctx->handles[ctx->handles_len++]       = wh;
 
-    size_t nevents  = ctx->events_len;
+    size_t nevents  = ctx->changelist_len;
     size_t nfolders = ctx->handles_len;
     XFILES_ASSERT(nevents == nfolders);
 }
@@ -975,7 +977,7 @@ void _xfiles_watch_add_listener(struct XFWatchContext* ctx, const char* path_, b
 int _xfiles_watch_find_listener_by_string(struct XFWatchContext* ctx, const char* path)
 {
     int    i;
-    size_t nevents  = ctx->events_len;
+    size_t nevents  = ctx->changelist_len;
     size_t nfolders = ctx->handles_len;
     XFILES_ASSERT(nevents == nfolders);
     for (i = 0; i < nfolders; i++)
@@ -992,12 +994,12 @@ int _xfiles_watch_find_listener_by_string(struct XFWatchContext* ctx, const char
 int _xfiles_watch_find_listener_by_fd(struct XFWatchContext* ctx, int fd)
 {
     int    i;
-    size_t nevents  = ctx->events_len;
+    size_t nevents  = ctx->changelist_len;
     size_t nfolders = ctx->handles_len;
     XFILES_ASSERT(nevents == nfolders);
     for (i = 0; i < nfolders; i++)
     {
-        struct kevent* e = ctx->events + i;
+        struct kevent* e = ctx->changelist + i;
         if (e->ident == fd)
             return i;
     }
@@ -1006,21 +1008,21 @@ int _xfiles_watch_find_listener_by_fd(struct XFWatchContext* ctx, int fd)
 
 void _xfiles_watch_remove_listener_at_index(struct XFWatchContext* ctx, int i)
 {
-    XFILES_ASSERT(ctx->events_len > 0 && ctx->handles_len > 0);
+    XFILES_ASSERT(ctx->changelist_len > 0 && ctx->handles_len > 0);
     if (i != -1)
     {
         struct XFWatchHandles wh   = ctx->handles[i]; // copy data onto stack before deleting
         const char*           path = ctx->stringpool + wh.stringpool_offset;
         close(wh.fd);
 
-        XFILES_ASSERT(ctx->events_len == ctx->handles_len);
-        size_t remaining = ctx->events_len - i - 1;
+        XFILES_ASSERT(ctx->changelist_len == ctx->handles_len);
+        size_t remaining = ctx->changelist_len - i - 1;
         if (remaining)
         {
-            memmove(ctx->events + i, ctx->events + i + 1, sizeof(*ctx->events) * remaining);
+            memmove(ctx->changelist + i, ctx->changelist + i + 1, sizeof(*ctx->changelist) * remaining);
             memmove(ctx->handles + i, ctx->handles + i + 1, sizeof(*ctx->handles) * remaining);
         }
-        ctx->events_len--;
+        ctx->changelist_len--;
         ctx->handles_len--;
     }
 }
@@ -1033,7 +1035,7 @@ void _xfiles_watch_cb_on_direntry(void* data, const xfiles_list_item_t* item)
     if (match_1 == 0 || match_2 == 0)
         return;
 
-    struct XFWatchContext* ctx = data;
+    struct XFWatchContext* ctx = (struct XFWatchContext*)data;
     _xfiles_watch_add_listener(ctx, item->path, item->is_dir);
 
     if (item->is_dir)
@@ -1064,145 +1066,163 @@ void _xfiles_watch_cb_poll_for_new_entries(void* data, const xfiles_list_item_t*
     }
 }
 
-void xfiles_watch(const char* path, unsigned cb_frequency_ms, void* udata, xfiles_watch_callback_t cb)
+xfiles_watch_context_t xfiles_watch_create(const char* path, void* udata, xfiles_watch_callback_t cb)
 {
-    struct XFWatchContext ctx = {0};
-    int                   kq  = 0;
+    XFILES_ASSERT(path != NULL); // What path should be watched?
+    XFILES_ASSERT(cb != NULL);   // Did you forget to write a callback?
 
-    XFILES_ASSERT(cb); // Did you forget to write a callback?
+    struct XFWatchContext* ctx = XFILES_MALLOC(sizeof(*ctx));
 
-    ctx.udata    = udata;
-    ctx.callback = cb;
+    ctx->udata    = udata;
+    ctx->callback = cb;
 
-    _xfiles_watch_add_listener(&ctx, path, true);
-    xfiles_list(path, &ctx, _xfiles_watch_cb_on_direntry);
+    _xfiles_watch_add_listener(ctx, path, true);
+    xfiles_list(path, ctx, _xfiles_watch_cb_on_direntry);
 
     // https://man.freebsd.org/cgi/man.cgi?kqueue
     // https://www.ipnom.com/FreeBSD-Man-Pages/kqueue.2.html
-    kq = kqueue();
+    ctx->kq = kqueue();
 
-    int loop = 0;
+    return ctx;
+}
+
+void xfiles_watch_flush(xfiles_watch_context_t _ctx)
+{
+    XFILES_ASSERT(_ctx != NULL);
+
+    struct XFWatchContext* ctx     = _ctx;
+    struct timespec        timeout = {0};
+    // timeout.tv_sec  = 0;
+    // timeout.tv_nsec = timeout_ms * 1000000;
+
+    int loop = 1;
     do
     {
-        struct timespec timeout;
-        timeout.tv_sec  = 0;
-        timeout.tv_nsec = cb_frequency_ms * 1000000;
-
-        struct kevent event_data[32] = {0};
-        size_t        nevents        = ctx.events_len;
-        // https://www.ipnom.com/FreeBSD-Man-Pages/kevent.2.html
-        int event_count = kevent(kq, ctx.events, nevents, event_data, XFILES_ARRLEN(event_data), &timeout);
-
-        if ((event_count < 0) || (event_data[0].flags == EV_ERROR))
-            break;
-
-        if (event_count)
+        enum
         {
-            for (int i = 0; i < event_count; i++)
+            XFILES_WATCH_MAX_EVENTS = 16,
+        };
+
+        struct kevent events[XFILES_WATCH_MAX_EVENTS] = {0};
+        // https://www.ipnom.com/FreeBSD-Man-Pages/kevent.2.html
+        int nevents = kevent(ctx->kq, ctx->changelist, ctx->changelist_len, events, XFILES_ARRLEN(events), &timeout);
+
+        for (int i = 0; i < nevents; i++)
+        {
+            if (events[0].flags == EV_ERROR)
+                continue;
+
+            // Helpful table pulled from here:
+            // https://github.com/segmentio/fs/blob/main/notify_darwin.go
+            // | Condition                               | Events                   |
+            // | --------------------------------------- | ------------------------ |
+            // | creating a file in a directory          | NOTE_WRITE               |
+            // | creating a directory in a directory     | NOTE_WRITE NOTE_LINK     |
+            // | creating a link in a directory          | NOTE_WRITE               |
+            // | creating a symlink in a directory       | NOTE_WRITE               |
+            // | removing a file from a directory        | NOTE_WRITE               |
+            // | removing a directory from a directory   | NOTE_WRITE NOTE_LINK     |
+            // | renaming a file within a directory      | NOTE_WRITE               |
+            // | renaming a directory within a directory | NOTE_WRITE               |
+            // | moving a file out of a directory        | NOTE_WRITE               |
+            // | moving a directory out of a directory   | NOTE_WRITE NOTE_LINK     |
+            // | writing to a file                       | NOTE_WRITE NOTE_EXTEND   |
+            // | truncating a file                       | NOTE_ATTRIB              |
+            // | overwriting a symlink                   | NOTE_DELETE, NOTE_RENAME |
+
+            // NOTE: The control over the event loop with kevent is nice, but the info returned absolutely sucks.
+            // There is no simple "file created" or "file deleted" event to respond to
+            // If you create a folder in Finder, you get a NOTE_WRITE|NOTE_LINK event
+            // If you move a folder to the Trash, you get a NOTE_WRITE|NOTE_LINK event...?
+            // If you `rm -R` a folder, you get a NOTE_WRITE|NOTE_LINK event, not a NOTE_DELETE event???
+            // kevents are effectively triggers for doing your own polling
+            struct kevent* e = events + i;
+            XFILES_ASSERT(e->filter == EVFILT_VNODE);
+
+            int cached_path_idx = _xfiles_watch_find_listener_by_fd(ctx, e->ident);
+            XFILES_ASSERT(cached_path_idx != -1);
+
+            const struct XFWatchHandles* wh      = ctx->handles + cached_path_idx;
+            const char*                  ev_path = ctx->stringpool + wh->stringpool_offset;
+
+            bool previously_existed = cached_path_idx != -1;
+            bool currently_exists   = xfiles_exists(ev_path);
+
+            // struct XFWatchHandles(*view_folders)[512] = (void*)ctx.handles;
+
+            if (previously_existed && !currently_exists)
             {
-                // Helpful table pulled from here:
-                // https://github.com/segmentio/fs/blob/main/notify_darwin.go
-                // | Condition                               | Events                   |
-                // | --------------------------------------- | ------------------------ |
-                // | creating a file in a directory          | NOTE_WRITE               |
-                // | creating a directory in a directory     | NOTE_WRITE NOTE_LINK     |
-                // | creating a link in a directory          | NOTE_WRITE               |
-                // | creating a symlink in a directory       | NOTE_WRITE               |
-                // | removing a file from a directory        | NOTE_WRITE               |
-                // | removing a directory from a directory   | NOTE_WRITE NOTE_LINK     |
-                // | renaming a file within a directory      | NOTE_WRITE               |
-                // | renaming a directory within a directory | NOTE_WRITE               |
-                // | moving a file out of a directory        | NOTE_WRITE               |
-                // | moving a directory out of a directory   | NOTE_WRITE NOTE_LINK     |
-                // | writing to a file                       | NOTE_WRITE NOTE_EXTEND   |
-                // | truncating a file                       | NOTE_ATTRIB              |
-                // | overwriting a symlink                   | NOTE_DELETE, NOTE_RENAME |
+                XFILES_ASSERT(_xfiles_watch_find_listener_by_fd(ctx, e->ident) != -1);
 
-                // NOTE: The control over the event loop with kevent is nice, but the info returned absolutely sucks.
-                // There is no simple "file created" or "file deleted" event to respond to
-                // If you create a folder in Finder, you get a NOTE_WRITE|NOTE_LINK event
-                // If you move a folder to the Trash, you get a NOTE_WRITE|NOTE_LINK event...?
-                // If you `rm -R` a folder, you get a NOTE_WRITE|NOTE_LINK event, not a NOTE_DELETE event???
-                // kevents are effectively triggers for doing your own polling
-                struct kevent* e = event_data + i;
-                XFILES_ASSERT(e->filter == EVFILT_VNODE);
-
-                int cached_path_idx = _xfiles_watch_find_listener_by_fd(&ctx, e->ident);
-                XFILES_ASSERT(cached_path_idx != -1);
-
-                const struct XFWatchHandles* wh      = ctx.handles + cached_path_idx;
-                const char*                  ev_path = ctx.stringpool + wh->stringpool_offset;
-
-                bool previously_existed = cached_path_idx != -1;
-                bool currently_exists   = xfiles_exists(ev_path);
-
-                // struct XFWatchHandles(*view_folders)[512] = (void*)ctx.handles;
-
-                if (previously_existed && !currently_exists)
+                // Remove watch listeners for every item in directory & subdirs
+                if (wh->is_dir)
                 {
-                    XFILES_ASSERT(_xfiles_watch_find_listener_by_fd(&ctx, e->ident) != -1);
-
-                    // Remove watch listeners for every item in directory & subdirs
-                    if (wh->is_dir)
+                    // We don't get "rename" events for deleted/renamed directories contents, so we have to remove
+                    // them from our data structure ourselves
+                    int N = ctx->handles_len;
+                    for (int j = N; j-- > 0;)
                     {
-                        // We don't get "rename" events for deleted/renamed directories contents, so we have to remove
-                        // them from our data structure ourselves
-                        int N = ctx.handles_len;
-                        for (int j = N; j-- > 0;)
+                        // if a (directory) is substring of b (subdir or file), remove b
+                        const char* candidate_path = ctx->stringpool + ctx->handles[j].stringpool_offset;
+                        const char* a              = ev_path;
+                        const char* b              = candidate_path;
+                        while (*a == *b && *a != 0 && *b != 0)
                         {
-                            // if a (directory) is substring of b (subdir or file), remove b
-                            const char* candidate_path = ctx.stringpool + ctx.handles[j].stringpool_offset;
-                            const char* a              = ev_path;
-                            const char* b              = candidate_path;
-                            while (*a == *b && *a != 0 && *b != 0)
-                            {
-                                a++;
-                                b++;
-                            }
-
-                            bool is_substring = *a == 0 && *b != 0;
-                            if (is_substring) // must be child directory or file
-                            {
-                                XFILES_ASSERT(!xfiles_exists(candidate_path));
-                                _xfiles_watch_remove_listener_at_index(&ctx, j);
-                                ctx.callback(XFILES_WATCH_DELETED, candidate_path, ctx.udata);
-                            }
+                            a++;
+                            b++;
                         }
-                    } // !is_dir
-                    _xfiles_watch_remove_listener_at_index(&ctx, cached_path_idx);
-                    ctx.callback(XFILES_WATCH_DELETED, ev_path, ctx.udata);
-                }
 
-                if (previously_existed && currently_exists)
-                {
-                    if (e->fflags & NOTE_WRITE)
-                    {
-                        ctx.callback(XFILES_WATCH_MODIFIED, ev_path, ctx.udata);
-
-                        // Dir was modified. A new file may have been added
-                        if (wh->is_dir)
-                            xfiles_list(ev_path, &ctx, _xfiles_watch_cb_poll_for_new_entries);
+                        bool is_substring = *a == 0 && *b != 0;
+                        if (is_substring) // must be child directory or file
+                        {
+                            XFILES_ASSERT(!xfiles_exists(candidate_path));
+                            _xfiles_watch_remove_listener_at_index(ctx, j);
+                            ctx->callback(XFILES_WATCH_DELETED, candidate_path, ctx->udata);
+                        }
                     }
-                    // if (e->fflags & NOTE_ATTRIB) // do we need an attrib event?
-                    //     ctx.callback(XFILES_WATCH_MODIFIED, ev_path, ctx.udata);
+                } // !is_dir
+                _xfiles_watch_remove_listener_at_index(ctx, cached_path_idx);
+                ctx->callback(XFILES_WATCH_DELETED, ev_path, ctx->udata);
+            }
+
+            if (previously_existed && currently_exists)
+            {
+                if (e->fflags & NOTE_WRITE)
+                {
+                    ctx->callback(XFILES_WATCH_MODIFIED, ev_path, ctx->udata);
+
+                    // Dir was modified. A new file may have been added
+                    if (wh->is_dir)
+                        xfiles_list(ev_path, ctx, _xfiles_watch_cb_poll_for_new_entries);
                 }
+                // if (e->fflags & NOTE_ATTRIB) // do we need an attrib event?
+                //     ctx.callback(XFILES_WATCH_MODIFIED, ev_path, ctx.udata);
             }
         }
 
-        loop = ctx.callback(XFILES_WATCH_CONTINUE, "", ctx.udata);
+        loop = nevents == XFILES_WATCH_MAX_EVENTS;
     }
     while (loop);
+}
 
-    close(kq);
+void xfiles_watch_destroy(void* _ctx_nb)
+{
+    XFILES_ASSERT(_ctx_nb != NULL);
+    struct XFWatchContext* ctx = _ctx_nb;
 
-    size_t nevents  = ctx.events_len;
-    size_t nfolders = ctx.handles_len;
+    if (ctx->kq != -1)
+        close(ctx->kq);
+
+    size_t nevents  = ctx->changelist_len;
+    size_t nfolders = ctx->handles_len;
     XFILES_ASSERT(nevents == nfolders);
     for (int i = nevents; i-- > 0;)
-        _xfiles_watch_remove_listener_at_index(&ctx, i);
-    XFILES_FREE(ctx.events);
-    XFILES_FREE(ctx.handles);
-    XFILES_FREE(ctx.stringpool);
+        _xfiles_watch_remove_listener_at_index(ctx, i);
+    XFILES_FREE(ctx->changelist);
+    XFILES_FREE(ctx->handles);
+    XFILES_FREE(ctx->stringpool);
+
+    XFILES_FREE(ctx);
 }
 
 #ifdef __OBJC__
