@@ -164,7 +164,7 @@ void* xvalloc(void* hint, size_t size)
 {
     // https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-virtualalloc
     void* ptr = VirtualAlloc(hint, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-    xalloc_assert(ptr != NULL);
+    // xalloc_assert(ptr != NULL);
     if (ptr == NULL) // Hint attempt may have failed, and we would rather just get some damn memory
         ptr = VirtualAlloc(0, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     xalloc_assert(ptr != NULL);
