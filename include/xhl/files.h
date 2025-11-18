@@ -62,13 +62,10 @@ void ctrl_c_callback(int code)
     g_running = 0;
 }
 
-int my_cb(enum XFILES_WATCH_TYPE type, const char* path, void* udata)
+void my_cb(enum XFILES_WATCH_TYPE type, const char* path, void* udata)
 {
     switch (type)
     {
-    case XFILES_WATCH_CONTINUE:
-        fprintf(stderr, "Continue %s\n", path);
-        break;
     case XFILES_WATCH_CREATED:
         fprintf(stderr, "Created %s\n", path);
         break;
@@ -84,7 +81,6 @@ int my_cb(enum XFILES_WATCH_TYPE type, const char* path, void* udata)
         // whatever actions you make in response
         break;
     }
-    return g_running;
 }
 
 int main()
@@ -92,8 +88,15 @@ int main()
     fprintf(stderr, "Press Crtl+C to exit\n");
     g_running = 1;
     signal(SIGINT, ctrl_c_callback);
-
-    xfiles_watch("/path/to/directory", 50, NULL, my_cb);
+    // setup event queue
+    xfiles_watch_context_t ctx = xfiles_watch_create("/path/to/directory", NULL, my_cb);
+    while (g_running)
+    {
+        xfiles_watch_flush(ctx); // poll for items in queue, trigger my_cb()
+        Sleep(50); // Windows, sleep 50ms
+        usleep(50000) // Unix, sleep 50ms
+    }
+    xfiles_watch_destroy(ctx); // cleanup
 
     return 0;
 }
@@ -257,7 +260,7 @@ enum XFILES_WATCH_TYPE
     XFILES_WATCH_DELETED,
     XFILES_WATCH_MODIFIED,
 };
-typedef int (*xfiles_watch_callback_t)(enum XFILES_WATCH_TYPE type, const char* path, void* udata);
+typedef void (*xfiles_watch_callback_t)(enum XFILES_WATCH_TYPE type, const char* path, void* udata);
 typedef void* xfiles_watch_context_t;
 
 // Sets up an event queue for file change notifications
@@ -629,109 +632,157 @@ void xfiles_list(const char* path, void* data, xfiles_list_callback_t* callback)
         FindClose(hFind);
 }
 
-void xfiles_watch(const char* path, unsigned cb_frequency_ms, void* udata, xfiles_watch_callback_t cb)
+typedef struct XFWatchContext
 {
     HANDLE hDirectory;
     // https://learn.microsoft.com/en-us/windows/win32/api/minwinbase/ns-minwinbase-overlapped
     OVERLAPPED overlapped;
 
-    int pathlen = strlen(path);
+    BYTE buffer[1024 * 4];
+
+    int  pathlen;
+    char path[MAX_PATH];
+
+    void*                   udata;
+    xfiles_watch_callback_t callback;
+} XFWatchContext;
+
+void _xfiles_watch_init_overlapped(XFWatchContext* ctx)
+{
+    // https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-readdirectorychangesw
+    BOOL  bWatchSubtree  = TRUE;
+    DWORD dwNotifyFilter = FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME |
+                           // FILE_NOTIFY_CHANGE_ATTRIBUTES |
+                           FILE_NOTIFY_CHANGE_LAST_WRITE;
+    BOOL ok = ReadDirectoryChangesW(
+        ctx->hDirectory,
+        ctx->buffer,
+        sizeof(ctx->buffer),
+        bWatchSubtree,
+        dwNotifyFilter,
+        NULL,
+        &ctx->overlapped,
+        NULL);
+    XFILES_ASSERT(ok);
+}
+
+xfiles_watch_context_t xfiles_watch_create(const char* path, void* udata, xfiles_watch_callback_t cb)
+{
+    XFWatchContext* ctx = (XFWatchContext*)XFILES_MALLOC(sizeof(*ctx));
+
+    WCHAR wPath[MAX_PATH] = {0};
+    int   num             = 0;
+
+    memset(ctx, 0, sizeof(*ctx));
+
+    ctx->pathlen  = strlen(path);
+    ctx->udata    = udata;
+    ctx->callback = cb;
+
     // Remove backslash
-    if (pathlen > 0 && (path[pathlen - 1] == '\\' || path[pathlen - 1] == '/'))
-        pathlen--;
+    if (ctx->pathlen > 0 && (path[ctx->pathlen - 1] == '\\' || path[ctx->pathlen - 1] == '/'))
+        ctx->pathlen--;
+    snprintf(ctx->path, sizeof(ctx->path), "%.*s", ctx->pathlen, path);
 
+    num = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, ctx->path, ctx->pathlen, wPath, XFILES_ARRLEN(wPath));
+    XFILES_ASSERT(num);
+
+    ctx->hDirectory = CreateFileW(
+        wPath,
+        FILE_LIST_DIRECTORY,
+        FILE_SHARE_READ,
+        NULL,
+        OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED,
+        NULL);
+    XFILES_ASSERT(ctx->hDirectory != INVALID_HANDLE_VALUE);
+
+    if (ctx->hDirectory != INVALID_HANDLE_VALUE)
     {
-        WCHAR wPath[MAX_PATH] = {0};
-        int   num = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, pathlen, wPath, XFILES_ARRLEN(wPath));
-        XFILES_ASSERT(num);
+        // https://learn.microsoft.com/en-us/windows/win32/api/synchapi/nf-synchapi-createeventw
+        ctx->overlapped.hEvent = CreateEventW(NULL, FALSE, 0, NULL);
+        XFILES_ASSERT(ctx->overlapped.hEvent);
 
-        hDirectory = CreateFileW(
-            wPath,
-            FILE_LIST_DIRECTORY,
-            FILE_SHARE_READ,
-            NULL,
-            OPEN_EXISTING,
-            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED,
-            NULL);
-        XFILES_ASSERT(hDirectory != INVALID_HANDLE_VALUE);
-        if (hDirectory == INVALID_HANDLE_VALUE)
-            return;
+        _xfiles_watch_init_overlapped(ctx);
     }
 
-    overlapped.hEvent = CreateEventW(NULL, FALSE, 0, NULL);
-    XFILES_ASSERT(overlapped.hEvent);
-
-    int loop = 0;
-    do
+    // Handle failure
+    if (ctx->hDirectory == INVALID_HANDLE_VALUE || ctx->overlapped.hEvent == NULL)
     {
-        BYTE buffer[1024 * 4];
-        // https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-readdirectorychangesw
-        BOOL success = ReadDirectoryChangesW(
-            hDirectory,
-            buffer,
-            sizeof(buffer),
-            TRUE,
-            FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME |
-                // FILE_NOTIFY_CHANGE_ATTRIBUTES |
-                FILE_NOTIFY_CHANGE_LAST_WRITE,
-            NULL,
-            &overlapped,
-            NULL);
-        XFILES_ASSERT(success);
-        if (!success)
-            goto exit;
+        xfiles_watch_destroy(ctx);
+        ctx = NULL;
+    }
 
-        DWORD result = WaitForSingleObject(overlapped.hEvent, cb_frequency_ms);
-        if (result == WAIT_OBJECT_0)
+    return ctx;
+}
+
+void xfiles_watch_flush(xfiles_watch_context_t _ctx)
+{
+    XFWatchContext* ctx = (XFWatchContext*)_ctx;
+
+    if (ctx->overlapped.Internal == STATUS_PENDING)
+        return;
+
+    // https://learn.microsoft.com/en-us/windows/win32/api/synchapi/nf-synchapi-waitforsingleobject
+    DWORD result = WaitForSingleObject(ctx->overlapped.hEvent, 0);
+
+    if (result == WAIT_OBJECT_0)
+    {
+        DWORD dwNumberOfBytesTransferred = 0;
+        DWORD dwOffset                   = 0;
+
+        // https://learn.microsoft.com/en-us/windows/win32/api/ioapiset/nf-ioapiset-getoverlappedresult
+        BOOL bWait = FALSE;
+        BOOL success = GetOverlappedResult(ctx->hDirectory, &ctx->overlapped, &dwNumberOfBytesTransferred, bWait);
+
+        while (success && dwOffset < dwNumberOfBytesTransferred)
         {
-            DWORD dwNumberOfBytesTransferred = 0;
-            GetOverlappedResult(hDirectory, &overlapped, &dwNumberOfBytesTransferred, TRUE);
+            FILE_NOTIFY_INFORMATION* pNotify = (FILE_NOTIFY_INFORMATION*)(ctx->buffer + dwOffset);
 
-            DWORD dwOffset = 0;
-            while (dwOffset < dwNumberOfBytesTransferred)
+            enum XFILES_WATCH_TYPE type = ((enum XFILES_WATCH_TYPE)0xffffffff); // invalid
+            if (pNotify->Action == FILE_ACTION_ADDED)
+                type = XFILES_WATCH_CREATED;
+            if (pNotify->Action == FILE_ACTION_REMOVED)
+                type = XFILES_WATCH_DELETED;
+            if (pNotify->Action == FILE_ACTION_MODIFIED)
+                type = XFILES_WATCH_MODIFIED;
+
+            if (type >= 0)
             {
-                FILE_NOTIFY_INFORMATION* pNotify = (FILE_NOTIFY_INFORMATION*)(buffer + dwOffset);
+                char fp[MAX_PATH] = {0};
+                int  NameLength   = pNotify->FileNameLength / sizeof(wchar_t);
 
-                enum XFILES_WATCH_TYPE type = 0;
-                if (pNotify->Action == FILE_ACTION_ADDED)
-                    type = XFILES_WATCH_CREATED;
-                if (pNotify->Action == FILE_ACTION_REMOVED)
-                    type = XFILES_WATCH_DELETED;
-                if (pNotify->Action == FILE_ACTION_MODIFIED)
-                    type = XFILES_WATCH_MODIFIED;
+                int fplen  = snprintf(fp, sizeof(fp), "%.*s" XFILES_DIR_STR, ctx->pathlen, ctx->path);
+                fplen     += WideCharToMultiByte(
+                    CP_UTF8,
+                    WC_ERR_INVALID_CHARS,
+                    pNotify->FileName,
+                    NameLength,
+                    fp + fplen,
+                    sizeof(fp) - fplen,
+                    NULL,
+                    NULL);
 
-                if (type)
-                {
-                    char fp[MAX_PATH];
-                    int  NameLength = pNotify->FileNameLength / sizeof(wchar_t);
-
-                    int fplen  = snprintf(fp, sizeof(fp), "%.*s" XFILES_DIR_STR, pathlen, path);
-                    fplen     += WideCharToMultiByte(
-                        CP_UTF8,
-                        WC_ERR_INVALID_CHARS,
-                        pNotify->FileName,
-                        NameLength,
-                        fp + fplen,
-                        sizeof(fp) - fplen,
-                        NULL,
-                        NULL);
-
-                    cb(type, fp, udata);
-                }
-
-                dwOffset += pNotify->NextEntryOffset;
-                if (pNotify->NextEntryOffset == 0)
-                    break;
+                ctx->callback(type, fp, ctx->udata);
             }
+
+            dwOffset += pNotify->NextEntryOffset;
+            if (pNotify->NextEntryOffset == 0)
+                break;
         }
 
-        loop = cb(XFILES_WATCH_CONTINUE, "", udata);
+        // After events are flushed we need to call ReadDirectoryChangesW() to prepare our event queue again
+        _xfiles_watch_init_overlapped(ctx);
     }
-    while (loop);
+}
 
-exit:
-    CloseHandle(overlapped.hEvent);
-    CloseHandle(hDirectory);
+void xfiles_watch_destroy(xfiles_watch_context_t _ctx)
+{
+    XFWatchContext* ctx = (XFWatchContext*)_ctx;
+    if (ctx->overlapped.hEvent)
+        CloseHandle(ctx->overlapped.hEvent);
+    if (ctx->hDirectory)
+        CloseHandle(ctx->hDirectory);
 }
 
 #endif // _WIN32
