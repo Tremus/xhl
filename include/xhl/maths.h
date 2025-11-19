@@ -1,6 +1,7 @@
 #ifndef XHL_MATHS_H
 #define XHL_MATHS_H
 // Contains some functions from licensed libraries. See bottom of file
+#include <math.h>
 #include <stdint.h>
 
 #define XM_Ef       2.718281828459045f
@@ -136,6 +137,11 @@ float        xm_fasterexp(float x);
 static float xm_fastexp2(float p);
 float        xm_fastpow(float a, float b);
 
+// sqrt is faster than hypot
+// https://stackoverflow.com/questions/61190844/when-should-i-use-hypot-over-sqrtl
+static inline float xm_hypotf(float x, float y) { return sqrtf(x * x + y * y); }
+static inline float xm_hypotd(double x, double y) { return sqrt(x * x + y * y); }
+
 /*@*@*@*@*
  @ Fancy @
  *@*@*@*@*/
@@ -143,8 +149,13 @@ float        xm_fastpow(float a, float b);
 // Convert a midi value (0-127) to Hz. Assumes A440
 float xm_midi_to_Hz(float midi);
 // Accurate to ~0.0005 dB
-static float xm_fast_gain_to_dB(float gain);
+// pow(10.0, dB / 20.0);
+// OR
+// pow(2, g / 6)
+// exp2(g / 6)
 static float xm_fast_dB_to_gain(float dB);
+// 20 * log10(g)
+static float xm_fast_gain_to_dB(float gain);
 // Denormalise to 20Hz-20kHz
 // Perfect at low and mid ranges. 0.15Hz error margin close to 20kHz
 float xm_fast_denomalise_Hz(float norm);
@@ -328,7 +339,7 @@ xm_complexf xm_csqrtf(float re, float im)
 {
     xm_complexf c;
 
-    float mag = hypotf(re, im);
+    float mag = xm_hypotf(re, im);
     c.re      = sqrtf((mag + re) * 0.5f);
     c.im      = sqrtf((mag - re) * 0.5f);
     c.im      = copysignf(c.im, im);
