@@ -71,10 +71,10 @@ union xm_complexf
 };
 typedef union xm_complexf xm_complexf;
 // clang-format on
-xm_complexf xm_caddf(float a_re, float a_im, float b_re, float b_im);
-xm_complexf xm_csubf(float a_re, float a_im, float b_re, float b_im);
-xm_complexf xm_cmulf(float a_re, float a_im, float b_re, float b_im);
-xm_complexf xm_cdivf(float a_re, float a_im, float b_re, float b_im);
+static inline xm_complexf xm_caddf(float a_re, float a_im, float b_re, float b_im);
+static inline xm_complexf xm_csubf(float a_re, float a_im, float b_re, float b_im);
+static inline xm_complexf xm_cmulf(float a_re, float a_im, float b_re, float b_im);
+static inline xm_complexf xm_cdivf(float a_re, float a_im, float b_re, float b_im);
 
 xm_complexf xm_csqrtf(float re, float im);
 xm_complexf xm_cexpf(float re, float im);
@@ -258,6 +258,38 @@ float xm_fastlog10(float x)
 float xm_fast_dB_to_gain(float dB) { return xm_fastexp2(dB * 0.166666667f); }
 float xm_fast_gain_to_dB(float gain) { return 20.0f * xm_fastlog10(gain); }
 
+xm_complexf xm_caddf(float a_re, float a_im, float b_re, float b_im)
+{
+    xm_complexf c;
+    c.re = a_re + b_re;
+    c.im = a_im + b_im;
+    return c;
+}
+
+xm_complexf xm_csubf(float a_re, float a_im, float b_re, float b_im)
+{
+    xm_complexf c;
+    c.re = a_re - b_re;
+    c.im = a_im - b_im;
+    return c;
+}
+
+xm_complexf xm_cmulf(float a_re, float a_im, float b_re, float b_im)
+{
+    xm_complexf c;
+    c.real = a_re * b_re - a_im * b_im;
+    c.imag = a_re * b_im + a_im * b_re;
+    return c;
+}
+
+xm_complexf xm_cdivf(float a_re, float a_im, float b_re, float b_im)
+{
+    xm_complexf c;
+    c.real = (a_re * b_re + a_im * b_im) / (b_re * b_re + b_im * b_im);
+    c.imag = (a_im * b_re - a_re * b_im) / (b_re * b_re + b_im * b_im);
+    return c;
+}
+
 #ifdef __cplusplus
 }
 #endif
@@ -290,38 +322,6 @@ int xm_dfloori(double d)
     union Cast c;
     c.d = d + 6755399441055743.5;
     return c.i[0];
-}
-
-xm_complexf xm_caddf(float a_re, float a_im, float b_re, float b_im)
-{
-    xm_complexf c;
-    c.re = a_re + b_re;
-    c.im = a_im + b_im;
-    return c;
-}
-
-xm_complexf xm_csubf(float a_re, float a_im, float b_re, float b_im)
-{
-    xm_complexf c;
-    c.re = a_re - b_re;
-    c.im = a_im - b_im;
-    return c;
-}
-
-xm_complexf xm_cmulf(float a_re, float a_im, float b_re, float b_im)
-{
-    xm_complexf c;
-    c.real = a_re * b_re - a_im * b_im;
-    c.imag = a_re * b_im + a_im * b_re;
-    return c;
-}
-
-xm_complexf xm_cdivf(float a_re, float a_im, float b_re, float b_im)
-{
-    xm_complexf c;
-    c.real = (a_re * b_re + a_im * b_im) / (b_re * b_re + b_im * b_im);
-    c.imag = (a_im * b_re - a_re * b_im) / (b_re * b_re + b_im * b_im);
-    return c;
 }
 
 xm_complexf xm_csqrtf(float re, float im)
