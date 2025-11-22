@@ -3,10 +3,10 @@
 // https://github.com/nothings/stb/blob/master/stb_ds.h
 #include <stddef.h>
 #include <string.h>
-#if ! (defined(XARR_REALLOC) || defined(XARR_FREE))
+#if !(defined(XARR_REALLOC) || defined(XARR_FREE))
 #include <stdlib.h>
 #define XARR_REALLOC(ptr, size) realloc(ptr, size)
-#define XARR_FREE(ptr) free(ptr)
+#define XARR_FREE(ptr)          free(ptr)
 #endif
 struct xarray_header
 {
@@ -45,4 +45,5 @@ static xarr_T* __xarr_setcap(xarr_T* ptr, size_t N, struct xarray_header* next_p
 #define xarr_last(a)            ((a)[xarr_header(a)->length - 1])
 #define xarr_pop(a)             (xarr_header(a)->length--, (a)[xarr_header(a)->length])
 #define xarr_end(a)             ((a) + xarr_len(a))
+#define xarr_copy(src, dst)     (xarr_setlen(dst, xarr_len(src)), memcpy(dst, src, sizeof((dst)[0]) * xarr_len(src)))
 // clang-format on
