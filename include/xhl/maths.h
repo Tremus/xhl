@@ -147,7 +147,7 @@ static inline float xm_hypotd(double x, double y) { return sqrt(x * x + y * y); 
  *@*@*@*@*/
 
 // Convert a midi value (0-127) to Hz. Assumes A440
-float xm_midi_to_Hz(float midi);
+static float xm_midi_to_Hz(float midi);
 // Accurate to ~0.0005 dB
 // pow(10.0, dB / 20.0);
 // OR
@@ -158,11 +158,11 @@ static float xm_fast_dB_to_gain(float dB);
 static float xm_fast_gain_to_dB(float gain);
 // Denormalise to 20Hz-20kHz
 // Perfect at low and mid ranges. 0.15Hz error margin close to 20kHz
-float xm_fast_denomalise_Hz(float norm);
+static float xm_fast_denomalise_Hz(float norm);
 // More accurate around 0.5, less around 0 & 1
-float xm_fast_normalise_Hz1(float Hz);
+static float xm_fast_normalise_Hz1(float Hz);
 // More accurate around 0 & 1, less around 0.5
-float xm_fast_normalise_Hz2(float Hz);
+static float xm_fast_normalise_Hz2(float Hz);
 
 /*0*1*0*1*
  1 Bits  0
@@ -268,6 +268,33 @@ float xm_fastlog10(float x)
 
 float xm_fast_dB_to_gain(float dB) { return xm_fastexp2(dB * 0.166666667f); }
 float xm_fast_gain_to_dB(float gain) { return 20.0f * xm_fastlog10(gain); }
+
+// pow(2, (midi - 69) / 12) * 440
+float xm_midi_to_Hz(float midi)
+{
+    float Hz = xm_fastexp2((midi - 69.0f) * 0.0833333f) * 440.0f;
+    // Ceiling of 20kHz. Removing the following line can break filters and cause infinity errors
+    return Hz > 20000.0f ? 20000.0f : Hz;
+}
+
+float xm_fast_denomalise_Hz(float norm) { return 20 * xm_fastexp2(norm * 10); }
+
+// Adapted from the ankerl & ekmett fast log algorithms
+// log(Hz / 20) / log(2) / 10
+// log(Hz * 0.05) / (LN2 * 0.1)
+// log(Hz * 0.05) * 0.14426950408889633
+// https://github.com/ekmett/approximate/blob/master/cbits/fast.c
+float xm_fast_normalise_Hz1(float Hz)
+{
+    xm_fi32 u = {.f = Hz * 0.05f};
+    return (u.i32 - 1064866805) * 1.1920929114219645e-08f; // ankerl32
+}
+
+float xm_fast_normalise_Hz2(float Hz)
+{
+    xm_fi32 u = {Hz * 0.05f};
+    return (u.i32 - 1065353217) * 1.1920929114219645e-08f; // ekmett_lb
+}
 
 xm_complexf xm_caddf(float a_re, float a_im, float b_re, float b_im)
 {
@@ -548,33 +575,6 @@ float xm_fastpow(float a, float b)
     xm_fi32 u = {a};
     u.i32     = (int)(b * (u.i32 - 1064866805) + 1064866805.0f);
     return u.f;
-}
-
-float xm_fast_denomalise_Hz(float norm) { return 20 * xm_fastexp2(norm * 10); }
-
-// Adapted from the ankerl & ekmett fast log algorithms
-// log(Hz / 20) / log(2) / 10
-// log(Hz * 0.05) / (LN2 * 0.1)
-// log(Hz * 0.05) * 0.14426950408889633
-// https://github.com/ekmett/approximate/blob/master/cbits/fast.c
-float xm_fast_normalise_Hz1(float Hz)
-{
-    xm_fi32 u = {.f = Hz * 0.05f};
-    return (u.i32 - 1064866805) * 1.1920929114219645e-08f; // ankerl32
-}
-
-float xm_fast_normalise_Hz2(float Hz)
-{
-    xm_fi32 u = {Hz * 0.05f};
-    return (u.i32 - 1065353217) * 1.1920929114219645e-08f; // ekmett_lb
-}
-
-// pow(2, (midi - 69) / 12) * 440
-float xm_midi_to_Hz(float midi)
-{
-    float Hz = xm_fastexp2((midi - 69.0f) * 0.0833333f) * 440.0f;
-    // Ceiling of 20kHz. Removing the following line can break filters and cause infinity errors
-    return Hz > 20000.0f ? 20000.0f : Hz;
 }
 
 uint64_t xm_align_up(uint64_t value, uint64_t alignment)
