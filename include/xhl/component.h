@@ -107,9 +107,10 @@ enum
     XCOMP_MOD_KEY_SHIFT     = 1 << 5,
     XCOMP_MOD_KEY_CMD       = 1 << 6,
     XCOMP_MOD_KEY_OPTION    = 1 << 7,
+    XCOMP_MOD_KEY_REPEAT    = 1 << 8,
     // Flag set when touch events are inverted on Apple devices
     // See: [NSEvent isDirectionInvertedFromDevice]
-    XCOMP_MOD_INVERTED_SCROLL = 1 << 8,
+    XCOMP_MOD_INVERTED_SCROLL = 1 << 9,
 
 #ifdef _WIN32
     XCOMP_MOD_PLATFORM_KEY_CTRL = XCOMP_MOD_KEY_CTRL,
