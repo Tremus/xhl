@@ -3,7 +3,7 @@
 
 #ifdef NDEBUG
 // clang-format off
-#define xassert(cond) do { (void)(cond); } while (0)
+#define xassert(...)
 // clang-format on
 #else // _DEBUG
 
@@ -22,7 +22,7 @@
 #define xprintf printf
 #endif
 
-#if ! defined(__cplusplus) && ! defined(_MSC_VER)
+#if !defined(__cplusplus) && !defined(_MSC_VER)
 #define xstatic_assert _Static_assert
 #else
 #include <assert.h>
