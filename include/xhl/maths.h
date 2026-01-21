@@ -168,7 +168,8 @@ static float xm_fast_normalise_Hz2(float Hz);
  1 Bits  0
  *0*1*0*1*/
 
-uint64_t xm_align_up(uint64_t value, uint64_t alignment);
+uint64_t               xm_align_up(uint64_t value, uint64_t alignment);
+static inline uint64_t xm_align_up_16(uint64_t v) { return (v + 0xf) & ~0xf; }
 
 uint32_t xm_next_po2u(uint32_t x);
 uint64_t xm_next_po2ull(uint64_t x);
