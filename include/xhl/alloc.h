@@ -116,15 +116,17 @@ void* xmalloc(size_t size)
     return ptr;
 }
 
-void* xrealloc(void* ptr, size_t new_size)
+void* xrealloc(void* old_ptr, size_t new_size)
 {
-    void* new_ptr = realloc(ptr, new_size);
+    void* new_ptr = realloc(old_ptr, new_size);
 #ifndef NDEBUG
-    if (ptr && ptr != new_ptr)
-        xalloc_remove_alloc(ptr);
-    if (new_ptr)
+    if (old_ptr != new_ptr)
+    {
+        if (old_ptr)
+            xalloc_remove_alloc(old_ptr);
         xalloc_add_alloc(new_ptr);
-    if (ptr == NULL && new_size > 0)
+    }
+    if (old_ptr == NULL && new_size > 0)
         g_num_xmallocs++;
 #endif
     if (new_ptr == NULL)
