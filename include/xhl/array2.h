@@ -1,4 +1,5 @@
 #pragma once
+#include <string.h>
 // Experimenting with a rewrite of array.h
 #ifdef __cplusplus
 #error Not supported yet...
@@ -19,13 +20,13 @@
 #endif // NDEBUG
 #endif // XARR_ASSERT
 
-struct xarray_header
+struct xarray_header2
 {
     size_t length;   // current num elements
     size_t capacity; // max num elements
 };
 
-#define xarr_header(a) ((struct xarray_header*)(a)-1)
+#define xarr_header(a) ((struct xarray_header2*)(a) - 1)
 #define xarr_len(a)    ((a) ? xarr_header(a)->length : 0)
 #define xarr_cap(a)    ((a) ? xarr_header(a)->capacity : 0)
 #define xarr_free(a)   ((void)((a) ? XARR_FREE(xarr_header(a)) : (void)0), (a) = NULL)
@@ -36,7 +37,7 @@ static void xarray_grow(void** arr, size_t stride, size_t nextcap)
     XARR_ASSERT(stride > 0);
     XARR_ASSERT(nextcap > 0);
     XARR_ASSERT((size_t)(*arr) % 16 == 0);
-    struct xarray_header* head = *((struct xarray_header**)arr);
+    struct xarray_header2* head = (struct xarray_header2*)*arr;
     if (head != NULL)
     {
         head--;
@@ -56,9 +57,26 @@ static void xarray_grow(void** arr, size_t stride, size_t nextcap)
     *arr = head;
 }
 
-#define xarr_setcap(a, N) (xarr_cap(a) < (N) ? xarray_grow((void**)&(a), sizeof(*(a)), N) : (void)0)
+static void xarray_setcap(void** a, size_t stride, size_t N)
+{
+    size_t current_cap = xarr_cap(a[0]);
+    if (current_cap < N)
+        xarray_grow(a, stride, N);
+}
 
-#define xarr_setlen(a, N) (xarr_len(a) != (N) ? (void)(xarr_setcap((a), (N)), xarr_header(a)->length = (N)) : (void)0)
+static void xarray_setlen(void** a, size_t stride, size_t N)
+{
+    size_t len = xarr_len(a[0]);
+    if (len != N)
+    {
+        xarray_setcap(a, stride, N);
+        xarr_header(a[0])->length = N;
+    }
+}
+
+#define xarr_setcap(a, N) xarray_setcap((void**)&(a), sizeof((a)[0]), N)
+
+#define xarr_setlen(a, N) xarray_setlen((void**)&(a), sizeof((a)[0]), N)
 #define xarr_addn(a, N)   (xarr_setlen(a, xarr_len(a) + (N)))
 #define xarr_push(a, v)   (xarr_setcap(a, xarr_len(a) + 1), (a)[xarr_header(a)->length++] = (v))
 #define xarr_insertn(a, i, N)                                                                                          \
@@ -68,7 +86,8 @@ static void xarray_grow(void** arr, size_t stride, size_t nextcap)
     (memmove(&(a)[i], &(a)[(i) + (N)], sizeof *(a) * (xarr_header(a)->length - (N) - (i))),                            \
      xarr_header(a)->length -= (N))
 
-#define xarr_delete(a, i) xarr_deleten(a, (i), 1)
-#define xarr_last(a)      ((a)[xarr_header(a)->length - 1])
-#define xarr_pop(a)       (xarr_header(a)->length--, (a)[xarr_header(a)->length])
-#define xarr_end(a)       ((a) + xarr_len(a))
+#define xarr_delete(a, i)   xarr_deleten(a, (i), 1)
+#define xarr_last(a)        ((a)[xarr_header(a)->length - 1])
+#define xarr_pop(a)         (xarr_header(a)->length--, (a)[xarr_header(a)->length])
+#define xarr_end(a)         ((a) + xarr_len(a))
+#define xarr_copy(src, dst) (xarr_setlen(dst, xarr_len(src)), memcpy(dst, src, sizeof((dst)[0]) * xarr_len(src)))
