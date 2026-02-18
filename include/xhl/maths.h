@@ -108,6 +108,9 @@ float xm_fastercos(float x);
 float xm_fastercosfull(float x);
 float xm_fastertan(float x);
 
+static float xm_fakesin(float x);
+static float xm_fakecos(float x);
+
 // Accepts input of πx/2
 float xm_fasttan_normalised(float x);
 
@@ -224,6 +227,20 @@ float xm_fastsin(float x)
 
 float xm_fastcos(float x) { return xm_fastsin(x + ((x > XM_HALF_PIf) ? (XM_HALF_PIf - XM_TAUf) : XM_HALF_PIf)); }
 float xm_fasttan(float x) { return xm_fastsin(x) / xm_fastsin(x + XM_HALF_PIf); }
+
+float xm_fakesin(float x)
+{
+    // https://bmtechjournal.wordpress.com/2020/05/27/super-fast-quadratic-sinusoid-approximation/
+    // wrap to [-0.5,0.5]
+    x = x * XM_1_TAUf;
+    x = x - floorf(x) - 0.5f;
+
+    // sine
+    float y = 2 * x * (1 - fabsf(2 * x)); // fake sin, [-0.25,0.25]
+    y       = y * -4;
+    return y;
+}
+float xm_fakecos(float x) { return xm_fakesin(x + XM_HALF_PIf); }
 
 // Paul Mineiro's exp2(log2(e))
 // https://github.com/romeric/fastapprox/blob/master/fastapprox/src/fastexp.h
