@@ -161,7 +161,7 @@ static float xm_fast_dB_to_gain(float dB);
 static float xm_fast_gain_to_dB(float gain);
 // Denormalise to 20Hz-20kHz
 // Perfect at low and mid ranges. 0.15Hz error margin close to 20kHz
-static float xm_fast_denomalise_Hz(float norm);
+static float xm_fast_denormalise_Hz(float norm);
 // More accurate around 0.5, less around 0 & 1
 static float xm_fast_normalise_Hz1(float Hz);
 // More accurate around 0 & 1, less around 0.5
@@ -295,7 +295,7 @@ float xm_midi_to_Hz(float midi)
     return Hz > 20000.0f ? 20000.0f : Hz;
 }
 
-float xm_fast_denomalise_Hz(float norm) { return 20 * xm_fastexp2(norm * 10); }
+float xm_fast_denormalise_Hz(float norm) { return 20 * xm_fastexp2(norm * 10); }
 
 // Adapted from the ankerl & ekmett fast log algorithms
 // log(Hz / 20) / log(2) / 10
