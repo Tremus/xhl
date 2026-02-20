@@ -5,6 +5,7 @@ Very much a WIP. Do not use. Come back later!
 #ifndef XHL_STRING_H
 #define XHL_STRING_H
 
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>
 
@@ -50,7 +51,6 @@ unsigned xtr_fmt(char* const buf, ptrdiff_t const cap, ptrdiff_t const offset, c
 #endif // XHL_STRING_H
 #ifdef XHL_STRING_IMPL
 #undef XHL_STRING_IMPL
-#include <stdarg.h>
 #include <stdio.h>
 
 size_t xtr_len(const char* str)
