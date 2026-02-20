@@ -479,23 +479,44 @@ bool xfiles_delete(const char* path)
 
 bool xfiles_open_file_explorer(const char* path)
 {
-    // https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shellexecutew
     WCHAR FilePath[MAX_PATH];
     int   num = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, FilePath, XFILES_ARRLEN(FilePath));
     XFILES_ASSERT(num);
     if (num)
     {
-        INT_PTR ret = (INT_PTR)ShellExecuteW(NULL, L"open", FilePath, NULL, NULL, SW_SHOWDEFAULT);
-        XFILES_ASSERT(ret > 32);
-        return ret > 32;
+        // This used to work but is now failing with error SE_ERR_NOASSOC
+        // I'm unsure if this is due to me upgrading to Windows 11, and its a Windows problem, or if its due to me
+        // installing and uninstalling the software FilePilot, which wanted to be the default app for opening folders
+        // It may be that uninstalling it did not restore FileExplorer
+        // Windows can't seem to figure out what application should be associated with "open"
 
-        // https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-shopenfolderandselectitems
-        LPITEMIDLIST pItemList = ILCreateFromPathW(FilePath);
-        if (pItemList)
+        // ShellExecuteW depends on Windows registry to find what application to use to with the verb "open"
+        // It's possible for the registry to be poisened by 3rd party software or manual tweaking
+        // This happened to me after downloading FilePilot, setting it as the default file browser, then uninstalling
+        // it. After doing this ShellExecuteW would always return 'SE_ERR_NOASSOC'
+        // https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shellexecutew
+        INT_PTR ret = (INT_PTR)ShellExecuteW(NULL, L"open", FilePath, NULL, NULL, SW_SHOWDEFAULT);
+
+        if (ret == SE_ERR_NOASSOC) // Oh dear, Windows can't figure out what application to use!?
         {
-            SHOpenFolderAndSelectItems(pItemList, 0, 0, 0);
-            ILFree(pItemList);
+            // https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shellexecuteexw
+            // https://learn.microsoft.com/en-us/windows/win32/api/shellapi/ns-shellapi-shellexecuteinfow
+            // https://learn.microsoft.com/en-us/windows/win32/shell/launch
+            SHELLEXECUTEINFOW sei = {0};
+            sei.cbSize            = sizeof(SHELLEXECUTEINFOW);
+            sei.fMask             = 0;
+            sei.lpVerb            = L"open";
+            sei.lpFile            = L"explorer.exe"; // Explicitly use File Explorer
+            sei.lpParameters      = FilePath;
+            sei.nShow             = SW_SHOW;
+
+            BOOL ok = ShellExecuteExW(&sei);
+
+            ret = (INT_PTR)sei.hInstApp;
         }
+        XFILES_ASSERT(ret > 32);
+
+        return ret > 32;
     }
     return false;
 }
@@ -732,7 +753,7 @@ void xfiles_watch_flush(xfiles_watch_context_t _ctx)
         DWORD dwOffset                   = 0;
 
         // https://learn.microsoft.com/en-us/windows/win32/api/ioapiset/nf-ioapiset-getoverlappedresult
-        BOOL bWait = FALSE;
+        BOOL bWait   = FALSE;
         BOOL success = GetOverlappedResult(ctx->hDirectory, &ctx->overlapped, &dwNumberOfBytesTransferred, bWait);
 
         while (success && dwOffset < dwNumberOfBytesTransferred)
