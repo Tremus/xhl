@@ -484,12 +484,6 @@ bool xfiles_open_file_explorer(const char* path)
     XFILES_ASSERT(num);
     if (num)
     {
-        // This used to work but is now failing with error SE_ERR_NOASSOC
-        // I'm unsure if this is due to me upgrading to Windows 11, and its a Windows problem, or if its due to me
-        // installing and uninstalling the software FilePilot, which wanted to be the default app for opening folders
-        // It may be that uninstalling it did not restore FileExplorer
-        // Windows can't seem to figure out what application should be associated with "open"
-
         // ShellExecuteW depends on Windows registry to find what application to use to with the verb "open"
         // It's possible for the registry to be poisened by 3rd party software or manual tweaking
         // This happened to me after downloading FilePilot, setting it as the default file browser, then uninstalling
