@@ -135,7 +135,7 @@ typedef struct XTRFmtInfo
     int precision;
 } XTRFmtInfo;
 
-inline ptrdiff_t xtr_strlen(char const* str)
+static inline ptrdiff_t xtr_strlen(char const* str)
 {
     char const*      begin = str;
     ptrdiff_t const* w;
@@ -162,7 +162,7 @@ inline ptrdiff_t xtr_strlen(char const* str)
     return str - begin;
 }
 
-inline int xtr_strncmp(char const* s1, char const* s2, ptrdiff_t len)
+static inline int xtr_strncmp(char const* s1, char const* s2, ptrdiff_t len)
 {
     for (; len > 0; s1++, s2++, len--)
     {
@@ -178,46 +178,46 @@ inline int xtr_strncmp(char const* s1, char const* s2, ptrdiff_t len)
     return 0;
 }
 
-inline char xtr_char_to_lower(char c)
+static inline char xtr_char_to_lower(char c)
 {
     if (c >= 'A' && c <= 'Z')
         return 'a' + (c - 'A');
     return c;
 }
 
-inline char xtr_char_to_upper(char c)
+static inline char xtr_char_to_upper(char c)
 {
     if (c >= 'a' && c <= 'z')
         return 'A' + (c - 'a');
     return c;
 }
 
-inline int xtr_char_is_space(char c)
+static inline int xtr_char_is_space(char c)
 {
     if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v')
         return true;
     return false;
 }
 
-inline int xtr_char_is_digit(char c) { return (c >= '0' && c <= '9'); }
+static inline int xtr_char_is_digit(char c) { return (c >= '0' && c <= '9'); }
 
-inline int xtr_char_is_hex_digit(char c)
+static inline int xtr_char_is_hex_digit(char c)
 {
     return (xtr_char_is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'));
 }
 
-inline int xtr_char_is_alpha(char c)
+static inline int xtr_char_is_alpha(char c)
 {
     if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'))
         return true;
     return false;
 }
 
-inline int xtr_char_is_alphanumeric(char c) { return xtr_char_is_alpha(c) || xtr_char_is_digit(c); }
+static inline int xtr_char_is_alphanumeric(char c) { return xtr_char_is_alpha(c) || xtr_char_is_digit(c); }
 
-inline int xtr_digit_to_int(char c) { return xtr_char_is_digit(c) ? c - '0' : c - 'W'; }
+static inline int xtr_digit_to_int(char c) { return xtr_char_is_digit(c) ? c - '0' : c - 'W'; }
 
-inline int xtr_hex_digit_to_int(char c)
+static inline int xtr_hex_digit_to_int(char c)
 {
     if (xtr_char_is_digit(c))
         return xtr_digit_to_int(c);
@@ -228,7 +228,7 @@ inline int xtr_hex_digit_to_int(char c)
     return -1;
 }
 
-inline void xtr_str_to_lower(char* str)
+static inline void xtr_str_to_lower(char* str)
 {
     if (!str)
         return;
@@ -239,7 +239,7 @@ inline void xtr_str_to_lower(char* str)
     }
 }
 
-inline void xtr_str_to_upper(char* str)
+static inline void xtr_str_to_upper(char* str)
 {
     if (!str)
         return;
@@ -326,7 +326,7 @@ const char _xtr_num_to_char_table[] = "0123456789"
                                       "abcdefghijklmnopqrstuvwxyz"
                                       "@$";
 
-inline char* xtr_strrev(char* str)
+static inline char* xtr_strrev(char* str)
 {
     ptrdiff_t len  = xtr_strlen(str);
     char*     a    = str + 0;
@@ -342,7 +342,7 @@ inline char* xtr_strrev(char* str)
     return str;
 }
 
-inline void xtr_u64_to_str(uint64_t value, char* string, int base, int flags)
+static inline void xtr_u64_to_str(uint64_t value, char* string, int base, int flags)
 {
     char* buf = string;
 
@@ -368,7 +368,7 @@ inline void xtr_u64_to_str(uint64_t value, char* string, int base, int flags)
     xtr_strrev(string);
 }
 
-inline ptrdiff_t xtr_strlcpy(char* dest, char const* source, ptrdiff_t len)
+static inline ptrdiff_t xtr_strlcpy(char* dest, char const* source, ptrdiff_t len)
 {
     ptrdiff_t result = 0;
     XTR_ASSERT(dest != NULL);
@@ -421,7 +421,7 @@ void const* xtr_memchr(void const* data, uint8_t c, ptrdiff_t n)
     return n ? (void const*)s : NULL;
 }
 
-inline ptrdiff_t xtr_strnlen(char const* str, ptrdiff_t max_len)
+static inline ptrdiff_t xtr_strnlen(char const* str, ptrdiff_t max_len)
 {
     char const* end = (char const*)xtr_memchr(str, 0, max_len);
     if (end)
@@ -700,7 +700,7 @@ ptrdiff_t _xtr_print_char(char* text, ptrdiff_t max_len, XTRFmtInfo* info, char 
     return _xtr_print_string(text, max_len, info, str);
 }
 
-inline void xtr_i64_to_str(int64_t value, char* string, int base, int flags)
+static inline void xtr_i64_to_str(int64_t value, char* string, int base, int flags)
 {
     char*    buf      = string;
     int      negative = 0;
