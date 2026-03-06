@@ -42,8 +42,12 @@ extern "C" {
 size_t xtr_len(const char* str);
 bool   xtr_startswith(const char* str, const char* XTR_RESTRICT prefix);
 bool   xtr_match(const char* a, const char* XTR_RESTRICT b);
-// case insensitive. expects a NULL terminated string
+// case insensitive. expects a NULL terminated ANSI string
 bool xtr_comparei(const char* a, const char* ext);
+
+// Uses Natural Sort Order algorithm
+// https://en.wikipedia.org/wiki/Natural_sort_order
+int xtr_natural_compare(char const* a, char const* b, unsigned case_insensitive);
 
 // snprintf replacement
 // Only returns bytes written. Returns 0 when bad parameters, encoding error, or offset is greater than cap-1.
@@ -106,12 +110,202 @@ static inline char xtr_char_to_lower(char c)
     return c;
 }
 
+static inline int xtr_char_is_digit(char c) { return (c >= '0' && c <= '9'); }
+
+static inline char xtr_char_to_upper(char c)
+{
+    if (c >= 'a' && c <= 'z')
+        return 'A' + (c - 'a');
+    return c;
+}
+
+static inline int xtr_char_is_space(char c)
+{
+    if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v')
+        return true;
+    return false;
+}
+
+static inline int xtr_char_is_hex_digit(char c)
+{
+    return (xtr_char_is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'));
+}
+
+static inline int xtr_char_is_alpha(char c)
+{
+    if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'))
+        return true;
+    return false;
+}
+
+static inline int xtr_char_is_alphanumeric(char c) { return xtr_char_is_alpha(c) || xtr_char_is_digit(c); }
+
+static inline int xtr_digit_to_int(char c) { return xtr_char_is_digit(c) ? c - '0' : c - 'W'; }
+
+static inline int xtr_hex_digit_to_int(char c)
+{
+    if (xtr_char_is_digit(c))
+        return xtr_digit_to_int(c);
+    else if ('a' <= c && c <= 'f') // is between
+        return c - 'a' + 10;
+    else if ('A' <= c && c <= 'F') // is between
+        return c - 'A' + 10;
+    return -1;
+}
+
 bool xtr_comparei(const char* a, const char* ext)
 {
     int i;
     for (i = 0; a[i] != 0 && xtr_char_to_lower(a[i]) == ext[i]; i++)
         ;
     return a[i] == ext[i];
+}
+
+/* -*- mode: c; c-file-style: "k&r" -*-
+
+  strnatcmp.c -- Perform 'natural order' comparisons of strings in C.
+  Copyright (C) 2000, 2004 by Martin Pool <mbp sourcefrog net>
+
+  This software is provided 'as-is', without any express or implied
+  warranty.  In no event will the authors be held liable for any damages
+  arising from the use of this software.
+
+  Permission is granted to anyone to use this software for any purpose,
+  including commercial applications, and to alter it and redistribute it
+  freely, subject to the following restrictions:
+
+  1. The origin of this software must not be misrepresented; you must not
+     claim that you wrote the original software. If you use this software
+     in a product, an acknowledgment in the product documentation would be
+     appreciated but is not required.
+  2. Altered source versions must be plainly marked as such, and must not be
+     misrepresented as being the original software.
+  3. This notice may not be removed or altered from any source distribution.
+*/
+
+/* partial change history:
+ *
+ * 2004-10-10 mbp: Lift out character type dependencies into macros.
+ *
+ * Eric Sosman pointed out that ctype functions take a parameter whose
+ * value must be that of an unsigned int, even on platforms that have
+ * negative chars in their default char type.
+ *
+ * 2026 Tremus removes macros, libc funtions are replaced by existing library functions
+ */
+
+static int _xtr_strnatcmp_compare_right(char const* a, char const* b)
+{
+    int bias = 0;
+
+    /* The longest run of digits wins.  That aside, the greatest
+       value wins, but we can't know that it will until we've scanned
+       both numbers to know that they have the same magnitude, so we
+       remember it in BIAS. */
+    for (;; a++, b++)
+    {
+        if (!xtr_char_is_digit(*a) && !xtr_char_is_digit(*b))
+            return bias;
+        if (!xtr_char_is_digit(*a))
+            return -1;
+        if (!xtr_char_is_digit(*b))
+            return +1;
+        if (*a < *b)
+        {
+            if (!bias)
+                bias = -1;
+        }
+        else if (*a > *b)
+        {
+            if (!bias)
+                bias = +1;
+        }
+        else if (!*a && !*b)
+            return bias;
+    }
+
+    return 0;
+}
+
+static int _xtr_strnatcmp_compare_left(char const* a, char const* b)
+{
+    /* Compare two left-aligned numbers: the first to have a
+       different value wins. */
+    for (;; a++, b++)
+    {
+        if (!xtr_char_is_digit(*a) && !xtr_char_is_digit(*b))
+            return 0;
+        if (!xtr_char_is_digit(*a))
+            return -1;
+        if (!xtr_char_is_digit(*b))
+            return +1;
+        if (*a < *b)
+            return -1;
+        if (*a > *b)
+            return +1;
+    }
+
+    return 0;
+}
+
+int xtr_natural_compare(char const* a, char const* b, unsigned fold_case)
+{
+    int  ai, bi;
+    char ca, cb;
+    int  fractional, result;
+
+    ai = bi = 0;
+    while (1)
+    {
+        ca = a[ai];
+        cb = b[bi];
+
+        /* skip over leading spaces or zeros */
+        while (xtr_char_is_space(ca))
+            ca = a[++ai];
+
+        while (xtr_char_is_space(cb))
+            cb = b[++bi];
+
+        /* process run of digits */
+        if (xtr_char_is_digit(ca) && xtr_char_is_digit(cb))
+        {
+            fractional = (ca == '0' || cb == '0');
+
+            if (fractional)
+            {
+                if ((result = _xtr_strnatcmp_compare_left(a + ai, b + bi)) != 0)
+                    return result;
+            }
+            else
+            {
+                if ((result = _xtr_strnatcmp_compare_right(a + ai, b + bi)) != 0)
+                    return result;
+            }
+        }
+
+        if (!ca && !cb)
+        {
+            /* The strings compare the same.  Perhaps the caller
+               will want to call strcmp to break the tie. */
+            return 0;
+        }
+
+        if (fold_case)
+        {
+            ca = xtr_char_to_upper(ca);
+            cb = xtr_char_to_upper(cb);
+        }
+
+        if (ca < cb)
+            return -1;
+
+        if (ca > cb)
+            return +1;
+
+        ++ai;
+        ++bi;
+    }
 }
 
 static inline ptrdiff_t _xtr_has_zero(ptrdiff_t x) { return (x)-0x101010101010101 & ~(x) & 0x8080808080808080; }
@@ -191,49 +385,6 @@ static inline int xtr_strncmp(char const* s1, char const* s2, ptrdiff_t len)
         }
     }
     return 0;
-}
-
-static inline char xtr_char_to_upper(char c)
-{
-    if (c >= 'a' && c <= 'z')
-        return 'A' + (c - 'a');
-    return c;
-}
-
-static inline int xtr_char_is_space(char c)
-{
-    if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v')
-        return true;
-    return false;
-}
-
-static inline int xtr_char_is_digit(char c) { return (c >= '0' && c <= '9'); }
-
-static inline int xtr_char_is_hex_digit(char c)
-{
-    return (xtr_char_is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'));
-}
-
-static inline int xtr_char_is_alpha(char c)
-{
-    if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'))
-        return true;
-    return false;
-}
-
-static inline int xtr_char_is_alphanumeric(char c) { return xtr_char_is_alpha(c) || xtr_char_is_digit(c); }
-
-static inline int xtr_digit_to_int(char c) { return xtr_char_is_digit(c) ? c - '0' : c - 'W'; }
-
-static inline int xtr_hex_digit_to_int(char c)
-{
-    if (xtr_char_is_digit(c))
-        return xtr_digit_to_int(c);
-    else if ('a' <= c && c <= 'f') // is between
-        return c - 'a' + 10;
-    else if ('A' <= c && c <= 'F') // is between
-        return c - 'A' + 10;
-    return -1;
 }
 
 static inline void xtr_str_to_lower(char* str)
