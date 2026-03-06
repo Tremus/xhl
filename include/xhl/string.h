@@ -47,7 +47,7 @@ bool xtr_comparei(const char* a, const char* ext);
 
 // Uses Natural Sort Order algorithm
 // https://en.wikipedia.org/wiki/Natural_sort_order
-int xtr_natural_compare(char const* a, char const* b, unsigned case_insensitive);
+int xtr_compare_natural(char const* a, char const* b, unsigned case_insensitive);
 
 // snprintf replacement
 // Only returns bytes written. Returns 0 when bad parameters, encoding error, or offset is greater than cap-1.
@@ -248,7 +248,7 @@ static int _xtr_strnatcmp_compare_left(char const* a, char const* b)
     return 0;
 }
 
-int xtr_natural_compare(char const* a, char const* b, unsigned fold_case)
+int xtr_compare_natural(char const* a, char const* b, unsigned fold_case)
 {
     int  ai, bi;
     char ca, cb;
