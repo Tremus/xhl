@@ -42,6 +42,8 @@ extern "C" {
 size_t xtr_len(const char* str);
 bool   xtr_startswith(const char* str, const char* XTR_RESTRICT prefix);
 bool   xtr_match(const char* a, const char* XTR_RESTRICT b);
+// case insensitive. expects a NULL terminated string
+bool xtr_comparei(const char* a, const char* ext);
 
 // snprintf replacement
 // Only returns bytes written. Returns 0 when bad parameters, encoding error, or offset is greater than cap-1.
@@ -62,7 +64,12 @@ unsigned xtr_fmt(char* const buf, ptrdiff_t const cap, ptrdiff_t const offset, c
 #endif // XHL_STRING_H
 #ifdef XHL_STRING_IMPL
 #undef XHL_STRING_IMPL
+#include <math.h>
+#include <stdint.h>
 #include <stdio.h>
+
+#define xtr_min(a, b) ((a) < (b) ? (a) : (b))
+#define xtr_max(a, b) ((a) > (b) ? (a) : (b))
 
 size_t xtr_len(const char* str)
 {
@@ -92,14 +99,22 @@ bool xtr_match(const char* a, const char* XTR_RESTRICT b)
     return *a == 0 && *b == 0;
 }
 
+static inline char xtr_char_to_lower(char c)
+{
+    if (c >= 'A' && c <= 'Z')
+        return 'a' + (c - 'A');
+    return c;
+}
+
+bool xtr_comparei(const char* a, const char* ext)
+{
+    int i;
+    for (i = 0; a[i] != 0 && xtr_char_to_lower(a[i]) == ext[i]; i++)
+        ;
+    return a[i] == ext[i];
+}
+
 static inline ptrdiff_t _xtr_has_zero(ptrdiff_t x) { return (x)-0x101010101010101 & ~(x) & 0x8080808080808080; }
-
-#include <math.h>
-#include <stdbool.h>
-#include <stdint.h>
-
-#define xtr_min(a, b) ((a) < (b) ? (a) : (b))
-#define xtr_max(a, b) ((a) > (b) ? (a) : (b))
 
 enum
 {
@@ -176,13 +191,6 @@ static inline int xtr_strncmp(char const* s1, char const* s2, ptrdiff_t len)
         }
     }
     return 0;
-}
-
-static inline char xtr_char_to_lower(char c)
-{
-    if (c >= 'A' && c <= 'Z')
-        return 'a' + (c - 'A');
-    return c;
 }
 
 static inline char xtr_char_to_upper(char c)
