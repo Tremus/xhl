@@ -1202,7 +1202,7 @@ unsigned xtr_fmt(char* const buf, ptrdiff_t const cap, ptrdiff_t const offset, c
     if (n < 0)
         n = 0;
 
-    XTR_ASSERT(remaining > n); // Your string is being truncated
+    XTR_ASSERT(remaining >= n); // Your string is being truncated
     if (n > remaining)
         n = remaining;
 
