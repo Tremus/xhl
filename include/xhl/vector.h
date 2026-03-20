@@ -32,7 +32,7 @@ typedef union
     struct { float l, r; };
     struct { float top, bottom; };
     struct { float t, b; };
-    struct { float start, end; };
+    struct { float begin, end; };
     struct { float x, y; };
     struct { float width, height; };
     struct { float w, h; };
@@ -43,6 +43,23 @@ typedef union
     float data[2];
     unsigned long long u64;
 } xvec2f;
+
+typedef union
+{
+    struct { double left, right; };
+    struct { double l, r; };
+    struct { double top, bottom; };
+    struct { double t, b; };
+    struct { double begin, end; };
+    struct { double x, y; };
+    struct { double width, height; };
+    struct { double w, h; };
+    struct { double real, imag; };
+    struct { double re, im; };
+    struct { double angle, magnitude; };
+    struct { double phase, mag; };
+    double data[2];
+} xvec2d;
 
 typedef union xvec3i
 {
