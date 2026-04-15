@@ -1293,6 +1293,7 @@ void xfiles_watch_destroy(void* _ctx_nb)
 
 #ifdef __OBJC__
 #import <AppKit/NSWorkspace.h>
+#import <Foundation/Foundation.h>
 
 bool xfiles_trash(const char* path)
 {
