@@ -264,8 +264,8 @@ struct xt_queue_t
 #ifdef XHL_THREAD_IMPL
 #undef XHL_THREAD_IMPL
 
-#if __SSE2__ || __AVX__
-// Used for _mm_pause()
+#if defined(__x86_64__) || defined(_M_X64)
+// Used for _mm_pause(), an SSE2 instruction, which naively assume is available
 // https://www.intel.com/content/www/us/en/docs/cpp-compiler/developer-guide-reference/2021-10/pause-intrinsic.html
 #include <emmintrin.h>
 #elif __arm64__

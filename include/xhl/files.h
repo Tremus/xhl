@@ -360,7 +360,7 @@ bool xfiles_read(const char* path, void** out, size_t* outlen)
                     FileSize.QuadPart = 0;
                 }
             }
-            ok = ok && CloseHandle(hFile);
+            ok &= CloseHandle(hFile);
             XFILES_ASSERT(ok);
         }
     }
@@ -393,7 +393,7 @@ bool xfiles_write(const char* path, const void* in, size_t inlen)
         {
             ok = WriteFile(hFile, in, inlen, &nBytesWritten, NULL);
             XFILES_ASSERT(ok);
-            ok = ok && CloseHandle(hFile);
+            ok &= CloseHandle(hFile);
             XFILES_ASSERT(ok);
         }
     }
@@ -418,7 +418,7 @@ bool xfiles_append(const char* path, const char* in, size_t inlen)
         {
             ok = WriteFile(hFile, in, inlen, &nBytesWritten, NULL);
             XFILES_ASSERT(ok);
-            ok = ok && CloseHandle(hFile);
+            ok &= CloseHandle(hFile);
             XFILES_ASSERT(ok);
         }
     }
