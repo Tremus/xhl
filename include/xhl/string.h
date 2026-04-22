@@ -60,6 +60,7 @@ int xtr_compare_natural(char const* a, char const* b, unsigned case_insensitive)
 unsigned xtr_fmt(char* const buf, ptrdiff_t const cap, ptrdiff_t const offset, char const* const XTR_RESTRICT fmt, ...)
     XTR_PRINTF_ARGS(4);
 #define xfmt(buf, offset, fmt, ...) xtr_fmt(buf, sizeof(buf), offset, fmt, __VA_ARGS__)
+ptrdiff_t xtr_fmt_va(char* text, ptrdiff_t max_len, char const* fmt, va_list va);
 
 #ifdef __cplusplus
 }
