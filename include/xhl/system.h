@@ -1,6 +1,28 @@
 #ifndef XHL_SYSTEM_H
 #define XHL_SYSTEM_H
 
+/*
+    Dead simple API to get (hopefully) all relevant hardware/OS info from users of your software
+
+    You only need to call xsys_init() once and everything you need is in 'g_xsysinfo'
+    It will intelligently detect multiple calls and skip double processing.
+    To refresh the data structure, use:
+        memset(&g_xsysinfo, 0, sizeof(g_xsysinfo));
+        xsys_init(&g_xsysinfo);
+
+    JUST TELL ME EVERYTHING ABOUT THE SYSTEM - no fine grained APIs for me to study, just give me data
+*/
+#if 0
+// Example program
+#define XHL_SYSTEM_IMPL
+#include <xhl/system.h>
+int main(void)
+{
+    xsys_print(&g_xsysinfo); // automatically calls xsys_init() :)
+    return 0;
+}
+#endif
+
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -45,13 +67,11 @@ typedef struct XSystemInfo
     XSystemInfoBool init;
 
     XSystemString os_name;
-    int           os_version_id;
+    int           os_version_number_major;
+    int           os_version_number_minor;
+    int           os_version_number_patch;
 
     XSystemString model_name; // eg. MacBookAir10,1
-
-    int os_version_number_major;
-    int os_version_number_minor;
-    int os_version_number_patch;
 
     XSystemString cpu_name;
     uint64_t      num_cores;
@@ -95,17 +115,241 @@ typedef struct XSystemInfo
                             // RAM and keep loads of chrome tabs open
 } XSystemInfo;
 
-extern XSystemInfo g_sysinfo;
+extern XSystemInfo g_xsysinfo;
 
-void print_info(XSystemInfo* info);
-void init_sysinfo(XSystemInfo* info);
+void xsys_init(XSystemInfo* info);
+void xsys_print(XSystemInfo* info);
 
 #endif // XHL_SYSTEM_H
 
 #ifdef XHL_SYSTEM_IMPL
 #undef XHL_SYSTEM_IMPL
 
-XSystemInfo g_sysinfo = {0};
+XSystemInfo g_xsysinfo = {0};
+
+#ifdef _WIN32
+
+#include <windows.h>
+
+#include <dxgi.h>
+#include <intrin.h>
+#include <winerror.h>
+#include <winreg.h>
+
+#ifdef _MSC_VER
+#pragma comment(lib, "advapi32.lib")
+#pragma comment(lib, "ntdll.lib")
+#pragma comment(lib, "dxguid.lib")
+#pragma comment(lib, "dxgi.lib")
+#endif
+
+static bool xsys_is_duplicate_gpu_name(const char* name, XSystemInfo* info)
+{
+    bool is_duplicate = false;
+    for (int i = 0; i < info->num_gpus && !is_duplicate; i++)
+    {
+        struct XGPUInfo* ginfo  = &info->gpus[i];
+        int              match  = strcmp(name, ginfo->name.buffer);
+        is_duplicate           |= match == 0;
+    }
+    return is_duplicate;
+}
+
+void xsys_init(XSystemInfo* info)
+{
+    if (info->init == XSYSTEM_INFO_BOOL_TRUE)
+        return;
+    info->init = XSYSTEM_INFO_BOOL_TRUE;
+
+    // OS Version
+    {
+        // https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-osversioninfow
+        RTL_OSVERSIONINFOW vi;
+        ZeroMemory(&vi, sizeof(vi));
+        vi.dwOSVersionInfoSize = sizeof(vi);
+
+        typedef LONG(WINAPI * RtlGetVersionProc)(PRTL_OSVERSIONINFOW);
+        RtlGetVersionProc pRtlGetVersion = NULL;
+        LONG              Status         = S_FALSE;
+
+        HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+        if (ntdll)
+        {
+            pRtlGetVersion = (RtlGetVersionProc)GetProcAddress(ntdll, "RtlGetVersion");
+            xsys_assert(pRtlGetVersion);
+        }
+
+        // https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdm/nf-wdm-rtlgetversion
+        if (pRtlGetVersion)
+            Status = pRtlGetVersion(&vi);
+
+        if (Status == S_OK)
+        {
+            info->os_version_number_major = vi.dwMajorVersion;
+            info->os_version_number_minor = vi.dwMinorVersion;
+            info->os_version_number_patch = vi.dwBuildNumber;
+        }
+
+        // https://learn.microsoft.com/en-us/windows/win32/sysinfo/operating-system-version
+        const char* name = "Windows";
+        if (vi.dwMajorVersion == 10 && vi.dwBuildNumber >= 22000)
+        {
+            name = "Windows 11";
+        }
+        else if (vi.dwMajorVersion == 10)
+        {
+            name = "Windows 10";
+        }
+        else if (vi.dwMajorVersion == 6)
+        {
+            switch (vi.dwMinorVersion)
+            {
+            case 0:
+                name = "Windows Vista";
+                break;
+            case 1:
+                name = "Windows 7";
+                break;
+            case 2:
+                name = "Windows 8";
+                break;
+            case 3:
+                name = "Windows 8.1";
+                break;
+            }
+        }
+        snprintf(info->os_name.buffer, sizeof(info->os_name), "%s", name);
+    }
+
+    // CPU
+    {
+        int regs[4];
+        __cpuid(regs, 0x80000000);
+        if ((unsigned int)regs[0] >= 0x80000004u) // is brand string supported?
+        {
+            __cpuidex((int*)info->cpu_name.buffer + 0, 0x80000002, 0);
+            __cpuidex((int*)info->cpu_name.buffer + 4, 0x80000003, 0);
+            __cpuidex((int*)info->cpu_name.buffer + 8, 0x80000004, 0);
+            _Static_assert(sizeof(info->cpu_name) > 48, "Increase buffer capacity");
+        }
+        else // Fallback
+        {
+            HKEY k;
+            // TODO: use RegOpenKeyExW?
+            LSTATUS Status = RegOpenKeyExA(
+                HKEY_LOCAL_MACHINE,
+                "HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0",
+                0,
+                KEY_READ,
+                &k);
+            if (Status == ERROR_SUCCESS)
+            {
+                DWORD sz = (DWORD)sizeof(info->cpu_name);
+                RegQueryValueExA(k, "ProcessorNameString", NULL, NULL, (LPBYTE)info->cpu_name.buffer, &sz);
+                RegCloseKey(k);
+            }
+        }
+
+        // Simulate padding
+        // memmove(info->cpu_name.buffer + 8, info->cpu_name.buffer, 48);
+        // memset(info->cpu_name.buffer, ' ', 8);
+
+        // NOTE: some Intel CPU are prefixed with spaces
+        // https://www.dungeon-master.com/forum/viewtopic.php?t=29636
+        char* p = info->cpu_name.buffer;
+        while (*p == ' ')
+            p++;
+        if (p > info->cpu_name.buffer)
+        {
+            ptrdiff_t diff = p - info->cpu_name.buffer;
+            memmove(info->cpu_name.buffer, p, sizeof(info->cpu_name) - diff);
+        }
+
+        // https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-getsysteminfo
+        // https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/ns-sysinfoapi-system_info
+        SYSTEM_INFO si;
+        ZeroMemory(&si, sizeof(si));
+        GetSystemInfo(&si);
+        info->num_cores = si.dwNumberOfProcessors;
+
+        // TODO: get E & P cores
+    }
+
+    // RAM
+    {
+        MEMORYSTATUSEX ms;
+        ZeroMemory(&ms, sizeof(ms));
+        ms.dwLength = sizeof(ms);
+        BOOL ok     = GlobalMemoryStatusEx(&ms);
+        xsys_assert(ok);
+        if (ok)
+        {
+            info->ram_max_bytes  = ms.ullTotalPhys;
+            info->ram_used_bytes = ms.ullTotalPhys - ms.ullAvailPhys;
+        }
+    }
+
+    // GPU
+    {
+        IDXGIFactory1*     pFactory1    = NULL;
+        UINT               AdapterIndex = 0;
+        IDXGIAdapter1*     pAdapter1    = NULL;
+        DXGI_ADAPTER_DESC1 desc;
+
+        HRESULT hr = CreateDXGIFactory1(&IID_IDXGIFactory1, (void**)&pFactory1);
+        xsys_assert(hr == S_OK);
+
+        while (pFactory1 != NULL && info->num_gpus < XSYS_ARRLEN(info->gpus))
+        {
+            struct XGPUInfo* ginfo = &info->gpus[info->num_gpus];
+
+            if (pAdapter1)
+            {
+                pAdapter1->lpVtbl->Release(pAdapter1);
+                pAdapter1 = NULL;
+            }
+
+            hr = pFactory1->lpVtbl->EnumAdapters1(pFactory1, AdapterIndex, &pAdapter1);
+            if (hr == DXGI_ERROR_NOT_FOUND)
+                break; // end enumeration
+            AdapterIndex++;
+
+            if (FAILED(hr))
+                continue;
+
+            if (FAILED(pAdapter1->lpVtbl->GetDesc1(pAdapter1, &desc)))
+                continue;
+            // Skip "Microsoft Basic Render Driver" and similar
+            if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)
+                continue;
+
+            WideCharToMultiByte(
+                CP_UTF8,
+                0,
+                desc.Description,
+                -1,
+                ginfo->name.buffer,
+                sizeof(ginfo->name.buffer) - 1,
+                NULL,
+                NULL);
+
+            if (xsys_is_duplicate_gpu_name(ginfo->name.buffer, info))
+                continue;
+
+            ginfo->vram_max_bytes = desc.DedicatedVideoMemory;
+
+            // Success
+            info->num_gpus++;
+        }
+        xsys_assert(pAdapter1 == NULL);
+
+        pFactory1->lpVtbl->Release(pFactory1);
+    }
+
+    // TODO: iterate monitors
+}
+
+#endif // _WIN32
 
 #ifdef __APPLE__
 #ifdef __OBJC__
@@ -138,10 +382,11 @@ static int sysctl_u64(const char* name, uint64_t* out)
     return sysctlbyname(name, out, &sz, NULL, 0);
 }
 
-void init_sysinfo(XSystemInfo* info)
+void xsys_init(XSystemInfo* info)
 {
     if (info->init == XSYSTEM_INFO_BOOL_TRUE)
         return;
+    info->init = XSYSTEM_INFO_BOOL_TRUE;
 
     NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
 
@@ -252,17 +497,19 @@ void init_sysinfo(XSystemInfo* info)
     }
 
     [pool release];
-
-    info->init = XSYSTEM_INFO_BOOL_TRUE;
 }
 
-void print_info(XSystemInfo* info)
+#endif // __OBJC__
+#endif // __APPLE__
+
+void xsys_print(XSystemInfo* info)
 {
     if (info->init != XSYSTEM_INFO_BOOL_TRUE)
-        init_sysinfo(info);
+        xsys_init(info);
 
     printf("OS               : %s\n", info->os_name.buffer);
-    printf("Model            : %s\n", info->model_name.buffer);
+    if (info->model_name.buffer[0])
+        printf("Model            : %s\n", info->model_name.buffer);
     printf("CPU              : %s  (%llu cores)\n", info->cpu_name.buffer, info->num_cores);
     for (int i = 0; i < info->num_core_perf_levels; i++)
     {
@@ -296,12 +543,8 @@ void print_info(XSystemInfo* info)
         printf("Display (%d)      : %s\n", i, minfo->name.buffer);
         printf("  - Scale Factor : %.1f\n", minfo->backingScaleFactor);
     }
-}
 
-#endif // __OBJC__
-#endif // __APPLE__
-#ifdef _WIN32
-#error "TODO"
-#endif // _WIN32
+    fflush(stdout);
+}
 
 #endif // XHL_SYSTEM_IMPL
