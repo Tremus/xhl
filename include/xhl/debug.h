@@ -1,19 +1,22 @@
 #ifndef XHL_DEBUG_H
 #define XHL_DEBUG_H
 
-#ifdef NDEBUG
-// clang-format off
-#define xassert(...)
-// clang-format on
-#else // _DEBUG
+// Useful for preventing off by one bugs in debuggers
+// These bugs are particularly annoying when breaking at the end of the scope, because the debugger pauses AFTER the
+// scope ends, and you lose the local context within the scope
+static int _xdebug_break_helper = 0;
 
 #ifdef _WIN32
-#define xassert(cond) (cond) ? (void)0 : __debugbreak()
+#define xdebugbreak() __debugbreak()
 #else
-#define xassert(cond) (cond) ? (void)0 : __builtin_debugtrap()
+#define xdebugbreak() __builtin_debugtrap()
 #endif
 
-#endif // _DEBUG
+#ifdef NDEBUG
+#define xassert(...)
+#else
+#define xassert(cond) (((cond) ? (void)0 : xdebugbreak()), _xdebug_break_helper += 0)
+#endif
 
 #ifdef _WIN32
 // Prints to VSCode debug console properly
