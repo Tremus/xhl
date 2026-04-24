@@ -60,25 +60,12 @@ typedef struct XSystemInfo
     uint64_t num_core_perf_levels;
     uint64_t num_cores_for_perf_level[8];
 
-    int num_monitors;
-    struct XMonitorInfo
-    {
-        XSystemString name;
-
-        // Number of actual pixels on the monitor. May not match users display settings, as many users with large
-        // monitors will want to "zoom" in items on their desktop and make text larger through scaling
-        int physical_pixels_x;
-        int physical_pixels_y;
-
-        // Total size of the desktop that gets rendered, BEFORE backingScaleFactor scaling is applied
-        // This buffer may get stretched when it appears on the monitor
-        // This is the more relavent dimension for programers worried about things like setting an ideal window size
-        int software_pixels_x;
-        int software_pixels_y;
-
-        // macOS only. Note that external monitors may have backingScaleFactor >= 2
-        double backingScaleFactor;
-    } monitors[8];
+    int64_t ram_max_bytes;
+    int64_t ram_used_bytes; // last known value
+                            // used to quickly diagnose problems for when a user asks:
+                            //     "why does this program crash immediately?"
+                            // then after several back and forths you find out they are using 98% of their 8gigs of
+                            // RAM and keep loads of chrome tabs open
 
     int num_gpus;
     int default_gpu_idx;
@@ -90,12 +77,32 @@ typedef struct XSystemInfo
         XSystemInfoBool is_unified_memory;
     } gpus[8];
 
-    int64_t ram_max_bytes;
-    int64_t ram_used_bytes; // last known value
-                            // used to quickly diagnose problems for when a user asks:
-                            //     "why does this program crash immediately?"
-                            // then after several back and forths you find out they are using 98% of their 8gigs of
-                            // RAM and keep loads of chrome tabs open
+    int num_monitors;
+    struct XMonitorInfo
+    {
+        XSystemString name;
+
+        // Number of actual pixels on the monitor. May not match users display settings, as many users with large
+        // monitors will want to "zoom" in items on their desktop and make text larger through scaling
+        // You probably don't want this value!
+        int physical_pixels_x;
+        int physical_pixels_y;
+
+        // Total size of the desktop that gets rendered, BEFORE backingScaleFactor scaling is applied
+        // This buffer may get stretched when it appears on the monitor
+        // This is the more relavent dimension for programers worried about things like setting an ideal window size
+        // Use this value!
+        int software_pixels_x;
+        int software_pixels_y;
+
+        // macOS only. Note that external monitors may have backingScaleFactor >= 2
+        double backingScaleFactor;
+
+        double refresh_rate_hz; // eg. 60Hz
+
+        // If true, your window will likely be here
+        XSystemInfoBool is_primary;
+    } monitors[8];
 } XSystemInfo;
 
 extern XSystemInfo g_xsysinfo;
@@ -518,6 +525,107 @@ void xsys_get_gpus_DXGI(XSystemInfo* info)
         pFactory2->lpVtbl->Release(pFactory2);
 }
 
+static BOOL CALLBACK xsys_monitor_enum_proc(HMONITOR hmon, HDC hdc, LPRECT pRect, LPARAM lparam)
+{
+    XSystemInfo* info = (XSystemInfo*)lparam;
+    if (info->num_monitors >= XSYS_ARRLEN(info->monitors))
+    {
+        return FALSE; // end enumeration
+    }
+
+    // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getmonitorinfow
+    // https://learn.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-monitorinfoexw
+    MONITORINFOEXW MonitorInfo;
+    ZeroMemory(&MonitorInfo, sizeof(MonitorInfo));
+    MonitorInfo.cbSize = sizeof(MonitorInfo);
+    if (!GetMonitorInfoW(hmon, (LPMONITORINFO)&MonitorInfo))
+    {
+        return TRUE; // continue enumeraion
+    }
+
+    struct XMonitorInfo* m = &info->monitors[info->num_monitors++];
+
+    // MONITORINFOEXW contains the same resolution users see if they go to
+    // Start > Settings > Display > Display resolution
+    // It may not be the real resolution of the monitor, but its the one that really matters!
+    m->software_pixels_x = MonitorInfo.rcMonitor.right - MonitorInfo.rcMonitor.left;
+    m->software_pixels_y = MonitorInfo.rcMonitor.bottom - MonitorInfo.rcMonitor.top;
+
+    if (MonitorInfo.dwFlags & MONITORINFOF_PRIMARY)
+        m->is_primary = XSYSTEM_INFO_BOOL_TRUE;
+    else
+        m->is_primary = XSYSTEM_INFO_BOOL_FALSE;
+
+    // MONITORINFOEXW contains garbage system names like "\\.\DISPLAY1". We need to translate to a human readable one
+    DISPLAYCONFIG_PATH_INFO paths[8];
+    DISPLAYCONFIG_MODE_INFO modes[8];
+    UINT                    NumPaths = XSYS_ARRLEN(paths);
+    UINT                    NumModes = XSYS_ARRLEN(modes);
+
+    // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-querydisplayconfig
+    LONG hr = QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &NumPaths, paths, &NumModes, modes, NULL);
+    if (hr == ERROR_SUCCESS)
+    {
+        // Get actual name
+        for (UINT32 i = 0; i < NumPaths; i++)
+        {
+            DISPLAYCONFIG_PATH_INFO* p = &paths[i];
+
+            // Match the source name
+            DISPLAYCONFIG_SOURCE_DEVICE_NAME SourceName;
+            ZeroMemory(&SourceName, sizeof(SourceName));
+            SourceName.header.type      = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME;
+            SourceName.header.size      = sizeof(SourceName);
+            SourceName.header.adapterId = p->sourceInfo.adapterId;
+            SourceName.header.id        = p->sourceInfo.id;
+
+            // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-displayconfiggetdeviceinfo
+            hr = DisplayConfigGetDeviceInfo(&SourceName.header);
+            if (hr != 0)
+                continue;
+
+            BOOL IsMatch = wcscmp(MonitorInfo.szDevice, SourceName.viewGdiDeviceName) == 0;
+            if (!IsMatch)
+                continue;
+
+            // Get target name
+            DISPLAYCONFIG_TARGET_DEVICE_NAME TargetName;
+            ZeroMemory(&TargetName, sizeof(TargetName));
+            TargetName.header.type      = DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME;
+            TargetName.header.size      = sizeof(TargetName);
+            TargetName.header.adapterId = p->targetInfo.adapterId;
+            TargetName.header.id        = p->targetInfo.id;
+
+            hr = DisplayConfigGetDeviceInfo(&TargetName.header);
+            if (hr != 0)
+                continue;
+
+            WCHAR* Name = TargetName.monitorFriendlyDeviceName;
+            WideCharToMultiByte(CP_UTF8, 0, Name, -1, m->name.buffer, sizeof(m->name.buffer) - 1, NULL, NULL);
+            break; // Found the match
+        }
+
+        // Get actual resolution
+        for (UINT32 i = 0; i < NumModes; i++)
+        {
+            DISPLAYCONFIG_MODE_INFO* mode = &modes[i];
+
+            if (mode->infoType == DISPLAYCONFIG_MODE_INFO_TYPE_TARGET &&
+                (m->physical_pixels_x == 0 && m->physical_pixels_y == 0))
+            {
+                m->physical_pixels_x = mode->targetMode.targetVideoSignalInfo.activeSize.cx;
+                m->physical_pixels_y = mode->targetMode.targetVideoSignalInfo.activeSize.cy;
+                m->refresh_rate_hz   = (double)mode->targetMode.targetVideoSignalInfo.vSyncFreq.Numerator /
+                                     (double)mode->targetMode.targetVideoSignalInfo.vSyncFreq.Denominator;
+                break;
+            }
+            // NOTE: DISPLAYCONFIG_MODE_INFO_TYPE_SOURCE get the software res
+        }
+    }
+
+    return TRUE; // Continue enumeraion
+}
+
 void xsys_init(XSystemInfo* info)
 {
     if (info->init == XSYSTEM_INFO_BOOL_TRUE)
@@ -647,7 +755,8 @@ void xsys_init(XSystemInfo* info)
         xsys_get_gpus_DXGI(info);
     }
 
-    // TODO: iterate monitors
+    // Monitors
+    EnumDisplayMonitors(NULL, NULL, xsys_monitor_enum_proc, (LPARAM)info);
 }
 
 #endif // _WIN32
@@ -841,7 +950,16 @@ void xsys_print(XSystemInfo* info)
     {
         struct XMonitorInfo* minfo = &info->monitors[i];
         printf("Display (%d)      : %s\n", i, minfo->name.buffer);
-        printf("  - Scale Factor : %.1f\n", minfo->backingScaleFactor);
+        if (minfo->is_primary)
+            printf("  - Primary      : %s\n", _sysbool_to_string[minfo->is_primary]);
+        if (minfo->physical_pixels_x && minfo->physical_pixels_y)
+            printf("  - Physical Res : %dx%d\n", minfo->physical_pixels_x, minfo->physical_pixels_y);
+        if (minfo->software_pixels_x && minfo->software_pixels_y)
+            printf("  - Software Res : %dx%d\n", minfo->software_pixels_x, minfo->software_pixels_y);
+        if (minfo->refresh_rate_hz)
+            printf("  - Refresh Rate : %.1fHz\n", minfo->refresh_rate_hz);
+        if (minfo->backingScaleFactor)
+            printf("  - Scale Factor : %.1f\n", minfo->backingScaleFactor);
     }
 
     fflush(stdout);
