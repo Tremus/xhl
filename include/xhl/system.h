@@ -143,8 +143,7 @@ XSystemInfo g_xsysinfo = {0};
 #include <windows.h>
 
 #include <D3dkmthk.h>
-// #include <dxgi.h>
-#include <dxgi1_4.h>
+#include <dxgi1_3.h>
 #include <intrin.h>
 #include <winerror.h>
 #include <winreg.h>
@@ -154,7 +153,7 @@ XSystemInfo g_xsysinfo = {0};
 #pragma comment(lib, "ntdll.lib")
 #pragma comment(lib, "dxguid.lib")
 #pragma comment(lib, "dxgi.lib")
-// #pragma comment(lib, "gdi32.lib")
+#pragma comment(lib, "gdi32.lib")
 #endif
 
 // D3DKMTQueryStatistics in particular is not always available in system headers,
@@ -606,6 +605,12 @@ static BOOL CALLBACK xsys_monitor_enum_proc(HMONITOR hmon, HDC hdc, LPRECT pRect
         }
 
         // Get actual resolution
+
+        // NOTE: It's possible to use EnumDisplaySettingsW(0,i,DEVMODEW) to iterate through all supported resolutions,
+        // and you could use that to estimate the monitors resolution based on the highest value, but from my testing
+        // that approach is quite slow (~2ms).
+        // This feels like the more "correct" way, and its fast
+
         for (UINT32 i = 0; i < NumModes; i++)
         {
             DISPLAYCONFIG_MODE_INFO* mode = &modes[i];
@@ -613,13 +618,13 @@ static BOOL CALLBACK xsys_monitor_enum_proc(HMONITOR hmon, HDC hdc, LPRECT pRect
             if (mode->infoType == DISPLAYCONFIG_MODE_INFO_TYPE_TARGET &&
                 (m->physical_pixels_x == 0 && m->physical_pixels_y == 0))
             {
-                m->physical_pixels_x = mode->targetMode.targetVideoSignalInfo.activeSize.cx;
-                m->physical_pixels_y = mode->targetMode.targetVideoSignalInfo.activeSize.cy;
-                m->refresh_rate_hz   = (double)mode->targetMode.targetVideoSignalInfo.vSyncFreq.Numerator /
-                                     (double)mode->targetMode.targetVideoSignalInfo.vSyncFreq.Denominator;
+                DISPLAYCONFIG_VIDEO_SIGNAL_INFO* pInfo = &mode->targetMode.targetVideoSignalInfo;
+                m->physical_pixels_x                   = pInfo->activeSize.cx;
+                m->physical_pixels_y                   = pInfo->activeSize.cy;
+                m->refresh_rate_hz = (double)pInfo->vSyncFreq.Numerator / (double)pInfo->vSyncFreq.Denominator;
                 break;
             }
-            // NOTE: DISPLAYCONFIG_MODE_INFO_TYPE_SOURCE get the software res
+            // NOTE: DISPLAYCONFIG_MODE_INFO_TYPE_SOURCE gets the software res
         }
     }
 
@@ -632,7 +637,7 @@ void xsys_init(XSystemInfo* info)
         return;
     info->init = XSYSTEM_INFO_BOOL_TRUE;
 
-    // OS Version
+    // OS Version. ~0.03ms
     {
         // https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-osversioninfow
         RTL_OSVERSIONINFOW vi;
@@ -692,7 +697,7 @@ void xsys_init(XSystemInfo* info)
         snprintf(info->os_name.buffer, sizeof(info->os_name), "%s", name);
     }
 
-    // CPU
+    // CPU. ~0.02ms
     {
         int regs[4];
         __cpuid(regs, 0x80000000);
@@ -724,17 +729,70 @@ void xsys_init(XSystemInfo* info)
             memmove(info->cpu_name.buffer, p, sizeof(info->cpu_name) - diff);
         }
 
-        // https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-getsysteminfo
-        // https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/ns-sysinfoapi-system_info
-        SYSTEM_INFO si;
-        ZeroMemory(&si, sizeof(si));
-        GetSystemInfo(&si);
-        info->num_cores = si.dwNumberOfProcessors;
+        // Get E & P cores
+        {
+            char  buffer[2048];
+            DWORD bufferSize = sizeof(buffer);
 
-        // TODO: get E & P cores
+            // https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-system_logical_processor_information_ex
+            // https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-getlogicalprocessorinformationex
+            // https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-processor_relationship
+
+            PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX pIterator = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX)buffer;
+
+            BOOL ok = GetLogicalProcessorInformationEx(RelationProcessorCore, pIterator, &bufferSize);
+            if (ok)
+            {
+                int   NumPCores = 0;
+                int   NumECores = 0;
+                DWORD offset    = 0;
+
+                while (offset < bufferSize)
+                {
+                    xsys_assert(pIterator->Relationship == RelationProcessorCore);
+                    if (pIterator->Processor.EfficiencyClass > 0)
+                    {
+                        NumPCores++;
+                    }
+                    else
+                    {
+                        // TODO: figure out how to detect "low power e-cores", distinct from regular e cores
+                        NumECores++;
+                    }
+
+                    offset    += pIterator->Size;
+                    pIterator  = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX)((BYTE*)buffer + offset);
+                }
+
+                info->num_cores = NumPCores + NumECores;
+
+                if (NumPCores && NumECores)
+                {
+                    info->num_core_perf_levels        = 2;
+                    info->num_cores_for_perf_level[0] = NumECores;
+                    info->num_cores_for_perf_level[1] = NumPCores;
+                }
+                else
+                {
+                    info->num_core_perf_levels        = 1;
+                    info->num_cores_for_perf_level[0] = info->num_cores;
+                }
+            }
+        }
+
+        if (info->num_cores == 0) // fallback
+        {
+            // If the processor sypports hyperthreading, you will likely get the thread count, not the core count...
+            // https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-getsysteminfo
+            // https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/ns-sysinfoapi-system_info
+            SYSTEM_INFO si;
+            ZeroMemory(&si, sizeof(si));
+            GetSystemInfo(&si);
+            info->num_cores = si.dwNumberOfProcessors;
+        }
     }
 
-    // RAM
+    // RAM. ~0.006ms
     {
         MEMORYSTATUSEX ms;
         ZeroMemory(&ms, sizeof(ms));
@@ -749,13 +807,13 @@ void xsys_init(XSystemInfo* info)
     }
 
     // GPU
-    xsys_get_gpus_D3DKMT(info);
-    if (info->num_gpus == 0) // fallback
+    xsys_get_gpus_D3DKMT(info); // ~1.5ms
+    if (info->num_gpus == 0)    // fallback, ~18ms
     {
         xsys_get_gpus_DXGI(info);
     }
 
-    // Monitors
+    // Monitors. ~0.12ms
     EnumDisplayMonitors(NULL, NULL, xsys_monitor_enum_proc, (LPARAM)info);
 }
 
