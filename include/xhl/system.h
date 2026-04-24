@@ -23,26 +23,7 @@ int main(void)
 }
 #endif
 
-#include <stdbool.h>
 #include <stdint.h>
-#include <stdio.h>
-#include <string.h>
-
-static int _xsys_break_helper = 0;
-
-#ifdef _WIN32
-#define xsys_debugbreak() __debugbreak()
-#else
-#define xsys_debugbreak() __builtin_debugtrap()
-#endif
-
-#ifdef NDEBUG
-#define xsys_assert(...)
-#else
-#define xsys_assert(cond) (((cond) ? (void)0 : xsys_debugbreak()), _xsys_break_helper += 0)
-#endif
-
-#define XSYS_ARRLEN(arr) (sizeof(arr) / sizeof(arr[0]))
 
 #if defined(_MSC_VER)
 #define XSYS_ALIGN(a) __declspec(align(a))
@@ -52,7 +33,7 @@ static int _xsys_break_helper = 0;
 
 typedef enum XSystemInfoBool
 {
-    XSYSTEM_INFO_BOOL_UNKOWN,
+    XSYSTEM_INFO_BOOL_UNKNOWN,
     XSYSTEM_INFO_BOOL_TRUE,
     XSYSTEM_INFO_BOOL_FALSE,
 } XSystemInfoBool;
@@ -84,14 +65,16 @@ typedef struct XSystemInfo
     {
         XSystemString name;
 
-        // Number of actual pixels on the monitor
-        int num_physical_pixels_x;
-        int num_physical_pixels_y;
+        // Number of actual pixels on the monitor. May not match users display settings, as many users with large
+        // monitors will want to "zoom" in items on their desktop and make text larger through scaling
+        int physical_pixels_x;
+        int physical_pixels_y;
 
-        // Total size of the desktop that gets rendered, before backingScaleFactor scaling.
-        // The OS may resize this to fill the screen
-        int num_logical_pixels_x;
-        int num_logical_pixels_y;
+        // Total size of the desktop that gets rendered, BEFORE backingScaleFactor scaling is applied
+        // This buffer may get stretched when it appears on the monitor
+        // This is the more relavent dimension for programers worried about things like setting an ideal window size
+        int software_pixels_x;
+        int software_pixels_y;
 
         // macOS only. Note that external monitors may have backingScaleFactor >= 2
         double backingScaleFactor;
@@ -125,12 +108,34 @@ void xsys_print(XSystemInfo* info);
 #ifdef XHL_SYSTEM_IMPL
 #undef XHL_SYSTEM_IMPL
 
+#include <stdbool.h>
+#include <stdio.h>
+#include <string.h>
+
+static int  _xsys_break_helper   = 0;
+const char* _sysbool_to_string[] = {"Unkown", "True", "False"};
+
+#ifdef _WIN32
+#define xsys_debugbreak() __debugbreak()
+#else
+#define xsys_debugbreak() __builtin_debugtrap()
+#endif
+
+#ifdef NDEBUG
+#define xsys_assert(...)
+#else
+#define xsys_assert(cond) (((cond) ? (void)0 : xsys_debugbreak()), _xsys_break_helper += 0)
+#endif
+
+#define XSYS_ARRLEN(arr) (sizeof(arr) / sizeof(arr[0]))
+
 XSystemInfo g_xsysinfo = {0};
 
 #ifdef _WIN32
 
 #include <windows.h>
 
+#include <D3dkmthk.h>
 #include <dxgi.h>
 #include <intrin.h>
 #include <winerror.h>
@@ -141,18 +146,69 @@ XSystemInfo g_xsysinfo = {0};
 #pragma comment(lib, "ntdll.lib")
 #pragma comment(lib, "dxguid.lib")
 #pragma comment(lib, "dxgi.lib")
+#pragma comment(lib, "gdi32.lib")
 #endif
 
-static bool xsys_is_duplicate_gpu_name(const char* name, XSystemInfo* info)
+// D3DKMTQueryStatistics in particular is not always available in system headers,
+// https://stackoverflow.com/questions/74239837/d3dkmtquerystatistics-not-found-in-d3dkmthk-h
+
+// https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/d3dkmthk/nf-d3dkmthk-d3dkmtopenadapterfromluid
+// https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/d3dkmthk/nf-d3dkmthk-d3dkmtcloseadapter
+// https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/d3dkmthk/nf-d3dkmthk-d3dkmtquerystatistics
+// https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/d3dkmthk/nf-d3dkmthk-d3dkmtqueryadapterinfo
+
+typedef LONG(APIENTRY* D3DKMTOpenAdapterFromLuidProc)(D3DKMT_OPENADAPTERFROMLUID*);
+typedef LONG(APIENTRY* D3DKMTCloseAdapterProc)(const D3DKMT_CLOSEADAPTER*);
+typedef LONG(APIENTRY* D3DKMTQueryStatisticsProc)(D3DKMT_QUERYSTATISTICS*);
+typedef LONG(APIENTRY* D3DKMTQueryAdapterInfoProc)(D3DKMT_QUERYADAPTERINFO*);
+static D3DKMTOpenAdapterFromLuidProc pD3DKMTOpenAdapterFromLuid = NULL;
+static D3DKMTCloseAdapterProc        pD3DKMTCloseAdapter        = NULL;
+static D3DKMTQueryStatisticsProc     pD3DKMTQueryStatistics     = NULL;
+static D3DKMTQueryAdapterInfoProc    pD3DKMTQueryAdapterInfo    = NULL;
+
+HMODULE g_gdi32 = NULL;
+
+struct XSystemQueriedAdapter
 {
-    bool is_duplicate = false;
-    for (int i = 0; i < info->num_gpus && !is_duplicate; i++)
+    D3DKMT_ADAPTERADDRESS Address;
+    D3DKMT_DEVICE_IDS     IDs;
+};
+struct XSystemQueriedAdapterArray
+{
+    int                          NumAdapters;
+    struct XSystemQueriedAdapter Adapters[8];
+};
+
+static NTSTATUS XSystemQueryAdapterInfo(D3DKMT_HANDLE hAdapter, KMTQUERYADAPTERINFOTYPE type, void* pData, UINT Size)
+{
+    if (!pD3DKMTQueryAdapterInfo)
+        return 1;
+
+    D3DKMT_QUERYADAPTERINFO info;
+    memset(&info, 0, sizeof(info));
+    memset(pData, 0, Size);
+    info.hAdapter              = hAdapter;
+    info.Type                  = type;
+    info.pPrivateDriverData    = pData;
+    info.PrivateDriverDataSize = Size;
+    return pD3DKMTQueryAdapterInfo(&info);
+}
+
+// Source: https://github.com/a1ive/nwinfo/blob/dfab034ef89d2546b6c4e6cc7730d29fb9059079/libnw/gpu/d3d_gpu.c#L69
+bool xsys_is_adapter_in_array(const struct XSystemQueriedAdapterArray* qaa, struct XSystemQueriedAdapter* a)
+{
+    const int N = qaa->NumAdapters;
+    for (int i = 0; i < N; i++)
     {
-        struct XGPUInfo* ginfo  = &info->gpus[i];
-        int              match  = strcmp(name, ginfo->name.buffer);
-        is_duplicate           |= match == 0;
+        const struct XSystemQueriedAdapter* b = &qaa->Adapters[i];
+        if (a->Address.BusNumber == b->Address.BusNumber && a->Address.DeviceNumber == b->Address.DeviceNumber &&
+            a->Address.FunctionNumber == b->Address.FunctionNumber)
+            return true;
+        if (a->IDs.VendorID == b->IDs.VendorID && a->IDs.DeviceID == b->IDs.DeviceID &&
+            a->IDs.SubSystemID == b->IDs.SubSystemID && a->IDs.RevisionID == b->IDs.RevisionID)
+            return true;
     }
-    return is_duplicate;
+    return false;
 }
 
 void xsys_init(XSystemInfo* info)
@@ -291,12 +347,40 @@ void xsys_init(XSystemInfo* info)
 
     // GPU
     {
-        IDXGIFactory1*     pFactory1    = NULL;
+        HRESULT            hr           = 0;
         UINT               AdapterIndex = 0;
+        IDXGIFactory1*     pFactory1    = NULL;
         IDXGIAdapter1*     pAdapter1    = NULL;
         DXGI_ADAPTER_DESC1 desc;
 
-        HRESULT hr = CreateDXGIFactory1(&IID_IDXGIFactory1, (void**)&pFactory1);
+        struct XSystemQueriedAdapterArray QueriedAdapters;
+        _STATIC_ASSERT(ARRAYSIZE(QueriedAdapters.Adapters) >= ARRAYSIZE(info->gpus));
+
+        ZeroMemory(&desc, sizeof(desc));
+        ZeroMemory(&QueriedAdapters, sizeof(QueriedAdapters));
+
+        BOOL HaveD3DKMTProcs = FALSE;
+        if (g_gdi32 == NULL)
+            g_gdi32 = GetModuleHandleW(L"gdi32.dll");
+        if (g_gdi32 == NULL)
+            g_gdi32 = LoadLibraryW(L"gdi32.dll");
+
+        HaveD3DKMTProcs = !!pD3DKMTOpenAdapterFromLuid && !!pD3DKMTCloseAdapter && !!pD3DKMTQueryStatistics &&
+                          !!pD3DKMTQueryAdapterInfo;
+
+        if (g_gdi32 != NULL && HaveD3DKMTProcs == FALSE)
+        {
+            pD3DKMTOpenAdapterFromLuid =
+                (D3DKMTOpenAdapterFromLuidProc)GetProcAddress(g_gdi32, "D3DKMTOpenAdapterFromLuid");
+            pD3DKMTCloseAdapter     = (D3DKMTCloseAdapterProc)GetProcAddress(g_gdi32, "D3DKMTCloseAdapter");
+            pD3DKMTQueryStatistics  = (D3DKMTQueryStatisticsProc)GetProcAddress(g_gdi32, "D3DKMTQueryStatistics");
+            pD3DKMTQueryAdapterInfo = (D3DKMTQueryAdapterInfoProc)GetProcAddress(g_gdi32, "D3DKMTQueryAdapterInfo");
+
+            HaveD3DKMTProcs = !!pD3DKMTOpenAdapterFromLuid && !!pD3DKMTCloseAdapter && !!pD3DKMTQueryStatistics &&
+                              !!pD3DKMTQueryAdapterInfo;
+        }
+
+        hr = CreateDXGIFactory1(&IID_IDXGIFactory1, (void**)&pFactory1);
         xsys_assert(hr == S_OK);
 
         while (pFactory1 != NULL && info->num_gpus < XSYS_ARRLEN(info->gpus))
@@ -311,12 +395,11 @@ void xsys_init(XSystemInfo* info)
 
             hr = pFactory1->lpVtbl->EnumAdapters1(pFactory1, AdapterIndex, &pAdapter1);
             if (hr == DXGI_ERROR_NOT_FOUND)
-                break; // end enumeration
+                break; // end of enumeration
             AdapterIndex++;
 
             if (FAILED(hr))
                 continue;
-
             if (FAILED(pAdapter1->lpVtbl->GetDesc1(pAdapter1, &desc)))
                 continue;
             // Skip "Microsoft Basic Render Driver" and similar
@@ -333,13 +416,119 @@ void xsys_init(XSystemInfo* info)
                 NULL,
                 NULL);
 
-            if (xsys_is_duplicate_gpu_name(ginfo->name.buffer, info))
-                continue;
+            if (HaveD3DKMTProcs)
+            {
+                // Good reference https://github.com/a1ive/nwinfo/blob/master/libnw/gpu/d3d_gpu.c
 
-            ginfo->vram_max_bytes = desc.DedicatedVideoMemory;
+                D3DKMT_OPENADAPTERFROMLUID OpenAdapter;
+                ZeroMemory(&OpenAdapter, sizeof(OpenAdapter));
 
-            // Success
-            info->num_gpus++;
+                OpenAdapter.AdapterLuid = desc.AdapterLuid;
+                hr                      = pD3DKMTOpenAdapterFromLuid(&OpenAdapter);
+                xsys_assert(hr == 0);
+
+                // Unfortunately Windows don't do a good job at removing duplucates from
+                // IDXGIFactory1::EnumAdapters1 Identify adapter and test for duplicates
+                if (hr == 0)
+                {
+                    // Gather identifiable info
+                    struct XSystemQueriedAdapter* xqa = &QueriedAdapters.Adapters[QueriedAdapters.NumAdapters];
+                    xqa->IDs.VendorID                 = desc.VendorId;
+                    xqa->IDs.DeviceID                 = desc.DeviceId;
+                    xqa->IDs.SubSystemID              = desc.SubSysId;
+                    xqa->IDs.RevisionID               = desc.Revision;
+
+                    const int type = KMTQAITYPE_ADAPTERADDRESS;
+                    hr = XSystemQueryAdapterInfo(OpenAdapter.hAdapter, type, &xqa->Address, sizeof(xqa->Address));
+                    xsys_assert(hr == 0);
+
+                    // Skip duplicate adapters
+                    // If duplicate is detected, set hr to FAILED(hr). This will stop num_gpus from incrementing
+                    if (hr == 0)
+                    {
+                        if (xsys_is_adapter_in_array(&QueriedAdapters, xqa))
+                        {
+                            hr = -1; // is duplicate adapter
+                        }
+                        else
+                        {
+                            QueriedAdapters.NumAdapters++;
+                        }
+                    }
+                }
+
+                // Get max VRAM
+                if (hr == 0)
+                {
+                    D3DKMT_SEGMENTSIZEINFO SegSize;
+                    const int              type = KMTQAITYPE_GETSEGMENTSIZE;
+                    hr = XSystemQueryAdapterInfo(OpenAdapter.hAdapter, type, &SegSize, sizeof(SegSize));
+                    xsys_assert(hr == 0);
+
+                    if (hr == 0)
+                    {
+                        // NOTE: have not tested this on any hardware with unified memory
+                        ginfo->vram_max_bytes = SegSize.DedicatedVideoMemorySize;
+                        if (SegSize.DedicatedVideoMemorySize)
+                            ginfo->is_unified_memory = XSYSTEM_INFO_BOOL_FALSE;
+                        if (SegSize.DedicatedVideoMemorySize == 0)
+                            ginfo->is_unified_memory = XSYSTEM_INFO_BOOL_TRUE;
+                    }
+                }
+
+                // Find num segments
+                UINT NbSegments = 0;
+                if (hr == 0)
+                {
+                    D3DKMT_QUERYSTATISTICS qs;
+                    ZeroMemory(&qs, sizeof(qs));
+                    qs.Type        = D3DKMT_QUERYSTATISTICS_ADAPTER;
+                    qs.AdapterLuid = desc.AdapterLuid;
+                    hr             = pD3DKMTQueryStatistics(&qs);
+                    xsys_assert(hr == 0);
+                    if (hr == 0)
+                        NbSegments = qs.QueryResult.AdapterInformation.NbSegments;
+                }
+
+                for (UINT SegmentId = 0; SegmentId < NbSegments; SegmentId++)
+                {
+                    D3DKMT_QUERYSTATISTICS qs;
+                    ZeroMemory(&qs, sizeof(qs));
+                    qs.Type                   = D3DKMT_QUERYSTATISTICS_SEGMENT;
+                    qs.AdapterLuid            = desc.AdapterLuid;
+                    qs.QuerySegment.SegmentId = SegmentId;
+
+                    if (pD3DKMTQueryStatistics(&qs) != ERROR_SUCCESS)
+                        continue;
+
+                    // Is segment shared memory?
+                    BOOL IsSharedMemory = !!qs.QueryResult.SegmentInformation.Aperture;
+                    if (!IsSharedMemory)
+                    {
+                        ginfo->vram_used_bytes += qs.QueryResult.SegmentInformation.BytesResident;
+                    }
+                }
+
+                if (OpenAdapter.hAdapter)
+                {
+                    D3DKMT_CLOSEADAPTER CloseAdapter;
+                    ZeroMemory(&CloseAdapter, sizeof(CloseAdapter));
+                    CloseAdapter.hAdapter = OpenAdapter.hAdapter;
+                    pD3DKMTCloseAdapter(&CloseAdapter);
+                }
+            }
+
+            if (ginfo->vram_max_bytes == 0) // Failed to detect VRAM. Use fallback
+                ginfo->vram_max_bytes = desc.DedicatedVideoMemory;
+
+            if (hr == 0)
+            {
+                info->num_gpus++; // we trust this info is correct
+            }
+            else
+            {
+                memset(ginfo, 0, sizeof(*ginfo)); // reset info
+            }
         }
         xsys_assert(pAdapter1 == NULL);
 
@@ -510,7 +699,8 @@ void xsys_print(XSystemInfo* info)
     printf("OS               : %s\n", info->os_name.buffer);
     if (info->model_name.buffer[0])
         printf("Model            : %s\n", info->model_name.buffer);
-    printf("CPU              : %s  (%llu cores)\n", info->cpu_name.buffer, info->num_cores);
+    printf("CPU              : %s\n", info->cpu_name.buffer);
+    printf("  - Total Cores  : %llu\n", info->num_cores);
     for (int i = 0; i < info->num_core_perf_levels; i++)
     {
         int count = info->num_cores_for_perf_level[i];
@@ -531,10 +721,8 @@ void xsys_print(XSystemInfo* info)
         double       total_mb = (double)ginfo->vram_max_bytes / one_mb;
         double       used_mb  = (double)ginfo->vram_used_bytes / one_mb;
 
-        const char* memtype = ginfo->is_unified_memory == XSYSTEM_INFO_BOOL_TRUE    ? " (Unified)"
-                              : ginfo->is_unified_memory == XSYSTEM_INFO_BOOL_FALSE ? " (Dedicated)"
-                                                                                    : "";
-        printf("  - VRAM         : %.3f/%.3f MB%s\n", used_mb, total_mb, memtype);
+        const char* memtype = _sysbool_to_string[ginfo->is_unified_memory];
+        printf("  - VRAM         : %.3f/%.3f MB, Unified (%s)\n", used_mb, total_mb, memtype);
     }
 
     for (int i = 0; i < info->num_monitors; i++)
