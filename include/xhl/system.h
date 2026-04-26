@@ -820,13 +820,16 @@ void xsys_init(XSystemInfo* info)
 #endif // _WIN32
 
 #ifdef __APPLE__
-#ifdef __OBJC__
+#if !defined(__OBJC__)
+#error "Compile this as objective C"
+#endif
 
 #import <AppKit/AppKit.h>
 #import <Foundation/Foundation.h>
 #import <IOKit/IOKitLib.h>
 #import <IOKit/graphics/IOGraphicsLib.h>
 #import <Metal/Metal.h>
+
 #import <mach/mach.h>
 #import <sys/sysctl.h>
 #import <sys/types.h>
@@ -856,9 +859,7 @@ void xsys_init(XSystemInfo* info)
         return;
     info->init = XSYSTEM_INFO_BOOL_TRUE;
 
-    NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
-
-    // OS Version
+    // OS Version ~3-4ms
     {
         NSProcessInfo*           pi    = [NSProcessInfo processInfo];
         NSOperatingSystemVersion v     = [pi operatingSystemVersion];
@@ -868,17 +869,22 @@ void xsys_init(XSystemInfo* info)
         info->ram_max_bytes = pi.physicalMemory;
 
         info->os_version_number_major = v.majorVersion;
-        info->os_version_number_major = v.minorVersion;
-        info->os_version_number_major = v.patchVersion;
+        info->os_version_number_minor = v.minorVersion;
+        info->os_version_number_patch = v.patchVersion;
 
         double total_gb = (double)info->ram_max_bytes / (1024.0 * 1024.0 * 1024.0);
 
-        snprintf(info->os_name.buffer, sizeof(info->os_name), "%s", name2);
+        if (name2)
+        {
+            snprintf(info->os_name.buffer, sizeof(info->os_name), "%s", name2);
+        }
+
+        [name release];
     }
 
     sysctl_str("hw.model", info->model_name.buffer, sizeof(info->model_name));
 
-    // CPU
+    // CPU ~0.010ms
     {
         sysctl_str("machdep.cpu.brand_string", info->cpu_name.buffer, sizeof(info->cpu_name));
         sysctl_u64("hw.ncpu", &info->num_cores);
@@ -894,7 +900,7 @@ void xsys_init(XSystemInfo* info)
         }
     }
 
-    // RAM
+    // RAM ~0.003ms
     {
         mach_port_t port = mach_host_self();
 
@@ -911,10 +917,10 @@ void xsys_init(XSystemInfo* info)
         info->ram_used_bytes = info->ram_max_bytes - available;
     }
 
-    // GPU
+    // GPU ~3ms?
     {
-        const NSArray<id<MTLDevice>>* devices = MTLCopyAllDevices();
-        const NSUInteger              N       = devices.count;
+        NSArray<id<MTLDevice>>* devices = MTLCopyAllDevices();
+        const NSUInteger        N       = devices.count;
         for (int i = 0; i < N && i < XSYS_ARRLEN(info->gpus); i++, info->num_gpus++)
         {
             const id<MTLDevice> device = [devices objectAtIndex:i];
@@ -937,11 +943,15 @@ void xsys_init(XSystemInfo* info)
             // Not sure if I trust these numbers...
             ginfo->vram_used_bytes = [device currentAllocatedSize];
         }
+
+        [devices release];
     }
 
-    // Monitor
+    // Monitor ~50ms
     {
-        const NSArray*   screens = [NSScreen screens];
+        // https://stackoverflow.com/questions/13859109/how-to-programmatically-determine-native-pixel-resolution-of-retina-macbook-pro
+
+        NSArray*         screens = [NSScreen screens];
         const NSUInteger N       = [screens count];
         for (int i = 0; i < N && i < XSYS_ARRLEN(info->monitors); i++, info->num_monitors++)
         {
@@ -960,14 +970,62 @@ void xsys_init(XSystemInfo* info)
 
             minfo->backingScaleFactor = [s backingScaleFactor];
 
-            // TODO: get minotor size
-        }
-    }
+            NSDictionary<NSDeviceDescriptionKey, id>* desc = [s deviceDescription];
+            if (desc)
+            {
+                NSNumber*         screenID = [desc objectForKey:@"NSScreenNumber"];
+                CGDirectDisplayID ID       = [screenID unsignedIntValue];
 
-    [pool release];
+                minfo->is_primary = CGDisplayIsMain(ID) ? XSYSTEM_INFO_BOOL_TRUE : XSYSTEM_INFO_BOOL_FALSE;
+
+                {
+                    CGDisplayModeRef mode = CGDisplayCopyDisplayMode(ID);
+                    if (mode)
+                    {
+                        minfo->refresh_rate_hz = CGDisplayModeGetRefreshRate(mode);
+                        CFRelease(mode);
+                    }
+                }
+
+                CGRect rectLogicalPixels = CGDisplayBounds(ID);
+                minfo->software_pixels_x = rectLogicalPixels.size.width;
+                minfo->software_pixels_y = rectLogicalPixels.size.height;
+
+                CFArrayRef ms = CGDisplayCopyAllDisplayModes(ID, NULL);
+                if (ms)
+                {
+                    CFIndex numModes = CFArrayGetCount(ms);
+
+                    for (int j = 0; j < numModes; ++j)
+                    {
+                        CGDisplayModeRef m = (CGDisplayModeRef)CFArrayGetValueAtIndex(ms, j);
+
+                        size_t pixelWidth  = CGDisplayModeGetPixelWidth(m);
+                        size_t pixelHeight = CGDisplayModeGetPixelHeight(m);
+
+                        // size_t width       = CGDisplayModeGetWidth(m);
+                        // size_t height      = CGDisplayModeGetHeight(m);
+
+                        // printf("dm #%d: %zu:%zu %zu:%zu\n", i, pixelWidth, pixelHeight, width, height);
+                        // CGDisplayModeGetIOFlags(m) & kDisplayModeNativeFlag
+                        // if (pixelWidth == width && pixelHeight == height)
+                        // {
+                        if (pixelWidth > minfo->physical_pixels_x)
+                            minfo->physical_pixels_x = pixelWidth;
+                        if (pixelHeight > minfo->physical_pixels_y)
+                            minfo->physical_pixels_y = pixelHeight;
+                        // }
+                    }
+
+                    CFRelease(ms);
+                }
+            }
+        }
+
+        [screens release];
+    }
 }
 
-#endif // __OBJC__
 #endif // __APPLE__
 
 void xsys_print(XSystemInfo* info)
