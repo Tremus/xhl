@@ -10,7 +10,21 @@ void     xtime_init();
 uint64_t xtime_now_ns();
 double   xtime_convert_ns_to_ms(uint64_t ns);
 double   xtime_convert_ns_to_sec(uint64_t ns);
-uint64_t xtime_unix_ms();
+uint64_t xtime_unix_ms(); // Epoch/unix timestamp. Ms since Jan. 1st, 1970
+
+// NOTE: GMT+00 only, no DST
+typedef struct XDate
+{
+    int year;        // Gregorian year
+    int month;       // 1-12
+    int day;         // 1-31
+    int hour;        // 0-23
+    int minute;      // 0-59
+    int second;      // 0-59. Leap seconds (60) not supported
+    int millisecond; // 0-999
+} XDate;
+
+XDate xtime_get_date(uint64_t unix_ms);
 
 #ifndef NDEBUG
 // Quick an dirty performance timer that won't show up in release. Should be thread safe.
@@ -28,6 +42,44 @@ void xtime_stopwatch_log_ms(const char* msg_prefix); // Resets stopwatch
 
 #ifdef XHL_TIME_IMPL
 #undef XHL_TIME_IMPL
+
+XDate xtime_get_date(uint64_t unix_ms)
+{
+    XDate date;
+
+    uint64_t unix_sec            = unix_ms / 1000;   // ms to sec
+    uint64_t unix_days           = unix_sec / 86400; // seconds to days, 86400 == num seconds in a day
+    uint32_t sec_since_midneight = unix_sec % 86400;
+
+    date.hour        = sec_since_midneight / 3600;
+    date.minute      = (sec_since_midneight / 60) % 60;
+    date.second      = sec_since_midneight % 60;
+    date.millisecond = unix_ms % 1000;
+
+    // civil_from_days
+    // https://howardhinnant.github.io/date_algorithms.html#civil_from_days
+    {
+        int      z   = (int)unix_days + 719468;
+        int      era = (z >= 0 ? z : z - 146096) / 146097;
+        unsigned doe = (unsigned)(z - era * 146097);
+
+        unsigned yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+        int      y   = (int32_t)yoe + (int32_t)(era * 400);
+
+        unsigned doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+        unsigned mp  = (5 * doy + 2) / 153;
+        unsigned d   = doy - (153 * mp + 2) / 5 + 1;
+        unsigned m   = mp < 10 ? mp + 3 : mp - 9;
+        if (mp >= 10)
+            y += 1;
+
+        date.year  = y;
+        date.month = m;
+        date.day   = d;
+    }
+
+    return date;
+}
 
 #ifdef _WIN32
 #include <Windows.h>
