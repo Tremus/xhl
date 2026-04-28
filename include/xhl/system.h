@@ -861,12 +861,12 @@ void xsys_init(XSystemInfo* info)
 
     // OS Version ~3-4ms
     {
-        NSProcessInfo*           pi    = [NSProcessInfo processInfo];
-        NSOperatingSystemVersion v     = [pi operatingSystemVersion];
-        NSString*                name  = [pi operatingSystemVersionString];
+        NSProcessInfo*           pinfo = [NSProcessInfo processInfo];
+        NSOperatingSystemVersion v     = [pinfo operatingSystemVersion];
+        NSString*                name  = [pinfo operatingSystemVersionString];
         const char*              name2 = [name UTF8String];
 
-        info->ram_max_bytes = pi.physicalMemory;
+        info->ram_max_bytes = pinfo.physicalMemory;
 
         info->os_version_number_major = v.majorVersion;
         info->os_version_number_minor = v.minorVersion;
