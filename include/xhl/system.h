@@ -1022,7 +1022,9 @@ void xsys_init(XSystemInfo* info)
             }
         }
 
-        [screens release];
+        // From my understanding of Obj-C reference counting, we should be releasing this here. For some reason however
+        // it causes scaling issues in a live GUI
+        // [screens release];
     }
 }
 
