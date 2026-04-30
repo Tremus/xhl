@@ -40,10 +40,11 @@ extern "C" {
 
 // Returns length of 0 terminated string. 0 not included.
 size_t xtr_len(const char* str);
-bool   xtr_startswith(const char* str, const char* XTR_RESTRICT prefix);
-bool   xtr_match(const char* a, const char* XTR_RESTRICT b);
+bool   xtr_startswith(const char* str, const char* prefix);
+bool   xtr_match(const char* a, const char* b);
 // case insensitive. expects a NULL terminated ANSI string
-bool xtr_comparei(const char* a, const char* ext);
+bool xtr_imatch(const char* a, const char* b);
+bool xtr_imatch2(const char* a, int alen, const char* b, int blen);
 
 // Uses Natural Sort Order algorithm
 // https://en.wikipedia.org/wiki/Natural_sort_order
@@ -154,12 +155,25 @@ static inline int xtr_hex_digit_to_int(char c)
     return -1;
 }
 
-bool xtr_comparei(const char* a, const char* ext)
+bool xtr_imatch(const char* a, const char* b)
 {
     int i;
-    for (i = 0; a[i] != 0 && xtr_char_to_lower(a[i]) == ext[i]; i++)
+    for (i = 0; a[i] != 0 && xtr_char_to_lower(a[i]) == xtr_char_to_lower(b[i]); i++)
         ;
-    return a[i] == ext[i];
+    return a[i] == b[i];
+}
+
+bool xtr_imatch2(const char* a, int alen, const char* b, int blen)
+{
+    if (!a || !b || alen != blen || alen <= 0)
+        return false;
+    int i;
+    for (i = 0; i < alen; i++)
+    {
+        if (xtr_char_to_lower(a[i]) != xtr_char_to_lower(b[i]))
+            break;
+    }
+    return i == alen;
 }
 
 /* -*- mode: c; c-file-style: "k&r" -*-
