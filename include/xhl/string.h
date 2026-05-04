@@ -46,6 +46,9 @@ bool   xtr_match(const char* a, const char* b);
 bool xtr_imatch(const char* a, const char* b);
 bool xtr_imatch2(const char* a, int alen, const char* b, int blen);
 
+// Simiar to strchr, only it NEVER returns NULL. If it fails, it returns the string at the terminating NULL char
+const char* xtr_find_character(const char* str, char chr);
+
 // Uses Natural Sort Order algorithm
 // https://en.wikipedia.org/wiki/Natural_sort_order
 int xtr_compare_natural(char const* a, char const* b, unsigned case_insensitive);
@@ -321,6 +324,17 @@ int xtr_compare_natural(char const* a, char const* b, unsigned fold_case)
         ++ai;
         ++bi;
     }
+}
+
+const char* xtr_find_character(const char* str, char c)
+{
+    while (*str != 0)
+    {
+        if (*str == c)
+            return str;
+        str++;
+    }
+    return str;
 }
 
 static inline ptrdiff_t _xtr_has_zero(ptrdiff_t x) { return (x)-0x101010101010101 & ~(x) & 0x8080808080808080; }
