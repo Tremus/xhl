@@ -31,11 +31,8 @@ enum
 {
     XCOMP_EVENT_PAINT,
     // geometry
-    XCOMP_EVENT_POSITION_CHANGED,
-    XCOMP_EVENT_SIZE_CHANGED,
     XCOMP_EVENT_DIMENSION_CHANGED,
     XCOMP_EVENT_VISIBILITY_CHANGED,
-    XCOMP_EVENT_ENABLEMENT_CHANGED,
     // mouse
     XCOMP_EVENT_MOUSE_ENTER,
     XCOMP_EVENT_MOUSE_EXIT,
@@ -409,8 +406,6 @@ void xcomp_set_dimensions(xcomp_component* comp, xcomp_dimensions dimensions)
     comp->dimensions.height = dimensions.height;
 
     xcomp_event_data data = {.raw = 0ul};
-    comp->event_handler(comp, XCOMP_EVENT_POSITION_CHANGED, data);
-    comp->event_handler(comp, XCOMP_EVENT_SIZE_CHANGED, data);
     comp->event_handler(comp, XCOMP_EVENT_DIMENSION_CHANGED, data);
 }
 
@@ -419,7 +414,6 @@ void xcomp_set_size(xcomp_component* comp, float width, float height)
     comp->dimensions.width  = width;
     comp->dimensions.height = height;
     xcomp_event_data data   = {.raw = 0ul};
-    comp->event_handler(comp, XCOMP_EVENT_SIZE_CHANGED, data);
     comp->event_handler(comp, XCOMP_EVENT_DIMENSION_CHANGED, data);
 }
 
@@ -481,12 +475,6 @@ void xcomp_set_enabled(xcomp_component* comp, bool enabled)
         comp->flags &= ~XCOMP_FLAG_IS_DISABLED;
     else
         comp->flags |= XCOMP_FLAG_IS_DISABLED;
-
-    if (prev_flags != comp->flags)
-    {
-        xcomp_event_data data = {.raw = enabled};
-        comp->event_handler(comp, XCOMP_EVENT_ENABLEMENT_CHANGED, data);
-    }
 }
 
 const xcomp_component* xcomp_get_root_component(const xcomp_component* comp)
