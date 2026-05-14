@@ -188,6 +188,8 @@ const char* xfiles_get_extension(const char* name);
 
 // Returns true if directory or file exists
 bool xfiles_exists(const char* path);
+// Returns true if directory, false in any other case
+bool xfiles_is_directory(const char* path);
 // Returns true if directory was created
 bool xfiles_create_directory(const char* path);
 // Creates directory and any required parent directories, then returns true if the exists or was craeted.
@@ -354,6 +356,22 @@ bool xfiles_exists(const char* path)
     if (num)
         return PathFileExistsW(pathunicode);
     return false;
+}
+
+bool xfiles_is_directory(const char* path)
+{
+    bool  is_directory = false;
+    DWORD attr         = 0;
+    WCHAR WPath[MAX_PATH];
+    int   num = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, WPath, ARRAYSIZE(WPath));
+    if (num)
+    {
+        // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getfileattributesw
+        attr = GetFileAttributesW(WPath);
+    }
+    if ((attr & FILE_ATTRIBUTE_DIRECTORY) && attr != INVALID_FILE_ATTRIBUTES)
+        is_directory = true;
+    return is_directory;
 }
 
 bool xfiles_create_directory(const char* path)
@@ -1005,6 +1023,19 @@ void xfiles_watch_destroy(xfiles_watch_context_t _ctx)
 
 // https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/access.2.html
 bool xfiles_exists(const char* path) { return access(path, F_OK) == 0; }
+
+bool xfiles_is_directory(const char* path)
+{
+    bool is_directory = false;
+
+    // https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/stat.2.html
+    struct stat st = {0};
+    lstat(path, &st);
+    if (S_ISDIR(st.st_mode))
+        is_directory = true;
+    return is_directory;
+}
+
 // https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/mkdir.2.html
 bool xfiles_create_directory(const char* path) { return mkdir(path, 0777) == 0; }
 
