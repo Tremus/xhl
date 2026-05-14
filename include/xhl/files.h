@@ -140,6 +140,7 @@ int main()
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef _WIN32
 #define XFILES_DIR_STR      "\\"
@@ -220,7 +221,7 @@ bool xfiles_open_file_explorer(const char* path);
 // OSX: Finder
 bool xfiles_select_in_file_explorer(const char* path);
 
-enum XFILES_USER_DIRECTORY
+typedef enum XFilesUserDirectory
 {
     // Windows: {letter}:\\Users\\{username}
     // macOS: /Users/{username}
@@ -235,10 +236,70 @@ enum XFILES_USER_DIRECTORY
     XFILES_USER_DIRECTORY_PICTURES,
     XFILES_USER_DIRECTORY_VIDEOS,
     XFILES_USER_DIRECTORY_COUNT,
-};
+} XFilesUserDirectory;
 
 // Returns number of bytes written to 'char* out', excluding the null terminating byte
-int xfiles_get_user_directory(char* out, size_t outlen, enum XFILES_USER_DIRECTORY loc);
+int xfiles_get_user_directory(char* out, size_t outlen, XFilesUserDirectory loc);
+
+typedef enum XFilesMetadataType
+{
+    XFILES_METADATA_TYPE_UNKNOWN = 0,
+    XFILES_METADATA_TYPE_FILE,
+    XFILES_METADATA_TYPE_DIRECTORY,
+    XFILES_METADATA_TYPE_SYMLINK,
+    XFILES_METADATA_TYPE_BLOCK_DEVICE,
+    XFILES_METADATA_TYPE_CHAR_DEVICE,
+    XFILES_METADATA_TYPE_FIFO,
+    XFILES_METADATA_TYPE_SOCKET
+} XFilesMetadataType;
+
+typedef struct XFilesMetadata
+{
+    int                last_error; // errno on macOS, GetLastError() on Windows
+    XFilesMetadataType type;
+
+    uint64_t size_bytes;
+
+    // Unix epoch times in nanoseconds
+    uint64_t creation_time_ns;      // File creation time (birthtime / CreationTime)
+    uint64_t modification_time_ns;  // Last write time (mtime / LastWriteTime)
+    uint64_t access_time_ns;        // Last access time (atime / LastAccessTime)
+    uint64_t status_change_time_ns; // POSIX ctime (macOS only, 0 on Windows)
+
+    // Might get rid of this. Can't imagine a use for it
+    uint64_t file_index; // (st_ino / (nFileIndexHigh << 32 | nFileSizeLow))
+    uint32_t num_links;
+    uint32_t volume_serial_number;
+
+    // POSIX-named fields (filled on macOS, mapped/empty on Windows)
+    // uint32_t st_mode;    // File mode bits (POSIX)
+    // uint32_t st_nlink;   // Hard link count
+    // uint32_t st_uid;     // Owner user ID
+    // uint32_t st_gid;     // Owner group ID
+    // uint64_t st_ino;     // Inode number (macOS) / file index (Windows)
+    // uint64_t st_dev;     // Device ID (macOS) / volume serial (Windows)
+    // uint64_t st_rdev;    // Device ID (special files)
+    // uint64_t st_blocks;  // Number of 512-byte blocks allocated
+    // uint32_t st_blksize; // Preferred I/O block size
+    // uint32_t st_flags;   // User-defined flags (macOS BSD flags)
+    // uint32_t st_gen;     // File generation number (macOS)
+
+    // Windows specific fields
+    uint32_t _dwFileAttributes; // BY_HANDLE_FILE_INFORMATION.dwFileAttributes
+    uint32_t _dwReparseTag;     // FILE_ATTRIBUTE_TAG_INFO.ReparseTag
+
+    // Convenience
+    bool is_readonly;
+    bool is_hidden;
+    bool is_system;
+    bool is_archive;
+    bool is_compressed;
+    bool is_encrypted;
+    bool is_executable;
+    bool is_symlink;
+} XFilesMetadata;
+
+XFilesMetadata xfiles_get_metadata(const char* path);
 
 typedef struct xfiles_list_item_t
 {
@@ -539,7 +600,7 @@ bool xfiles_select_in_file_explorer(const char* path)
     return false;
 }
 
-int xfiles_get_user_directory(char* out, size_t outlen, enum XFILES_USER_DIRECTORY loc)
+int xfiles_get_user_directory(char* out, size_t outlen, XFilesUserDirectory loc)
 {
     // https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-shgetknownfolderpath
     // https://learn.microsoft.com/en-us/windows/win32/shell/knownfolderid
@@ -569,9 +630,9 @@ int xfiles_get_user_directory(char* out, size_t outlen, enum XFILES_USER_DIRECTO
     int   num  = 0;
     PWSTR Path = NULL;
     if (loc < 0)
-        loc = (enum XFILES_USER_DIRECTORY)0;
+        loc = (XFilesUserDirectory)0;
     if (loc >= XFILES_USER_DIRECTORY_COUNT)
-        loc = (enum XFILES_USER_DIRECTORY)(ARRAYSIZE(FOLDER_IDS) - 1);
+        loc = (XFilesUserDirectory)(ARRAYSIZE(FOLDER_IDS) - 1);
     if (S_OK == SHGetKnownFolderPath(XFILES_REF(FOLDER_IDS[loc]), 0, NULL, &Path))
     {
         num = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, Path, -1, out, outlen, NULL, NULL);
@@ -582,6 +643,139 @@ int xfiles_get_user_directory(char* out, size_t outlen, enum XFILES_USER_DIRECTO
     }
 
     return num;
+}
+
+// Mostly LLM generated. GLWTS
+XFilesMetadata xfiles_get_metadata(const char* path)
+{
+    XFilesMetadata meta = {0};
+
+    if (path == NULL || path[0] == '\0')
+    {
+        meta.last_error = -1;
+        return meta;
+    }
+
+    // Open file
+    HANDLE hFile = INVALID_HANDLE_VALUE;
+    {
+        WCHAR WPath[MAX_PATH] = {0};
+        int   wlen            = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, WPath, ARRAYSIZE(WPath));
+        if (wlen == 0)
+        {
+            meta.last_error = (int)GetLastError();
+            return meta;
+        }
+        // Open with FILE_FLAG_BACKUP_SEMANTICS so directories also work,
+        // and FILE_FLAG_OPEN_REPARSE_POINT so we stat the symlink itself.
+        // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew
+        hFile = CreateFileW(
+            WPath,
+            FILE_READ_ATTRIBUTES,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            NULL,
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+            NULL);
+    }
+
+    if (hFile == INVALID_HANDLE_VALUE)
+    {
+        meta.last_error = (int32_t)GetLastError();
+        return meta;
+    }
+
+    BY_HANDLE_FILE_INFORMATION info;
+    BOOL                       ok = GetFileInformationByHandle(hFile, &info);
+    if (!ok)
+    {
+        meta.last_error = (int32_t)GetLastError();
+        CloseHandle(hFile);
+        return meta;
+    }
+
+    meta.size_bytes = ((uint64_t)info.nFileSizeHigh << 32) | (uint64_t)info.nFileSizeLow;
+
+    // Convert FILETIME (100-ns intervals since 1601-01-01 UTC) to ns since 1970-01-01 UTC
+    {
+        // 116444736000000000 = number of 100ns ticks between 1601-01-01 and 1970-01-01
+        const uint64_t EPOCH_DIFF_100NS = 116444736000000000ULL;
+
+        ULARGE_INTEGER c, m, a;
+        c.LowPart  = info.ftCreationTime.dwLowDateTime;
+        c.HighPart = info.ftCreationTime.dwHighDateTime;
+        m.LowPart  = info.ftLastWriteTime.dwLowDateTime;
+        m.HighPart = info.ftLastWriteTime.dwHighDateTime;
+        a.LowPart  = info.ftLastAccessTime.dwLowDateTime;
+        a.HighPart = info.ftLastAccessTime.dwHighDateTime;
+
+        meta.creation_time_ns      = (uint64_t)((c.QuadPart - EPOCH_DIFF_100NS) * 100ULL);
+        meta.modification_time_ns  = (uint64_t)((m.QuadPart - EPOCH_DIFF_100NS) * 100ULL);
+        meta.access_time_ns        = (uint64_t)((a.QuadPart - EPOCH_DIFF_100NS) * 100ULL);
+        meta.status_change_time_ns = 0; // no direct POSIX ctime equivalent on Windows
+    }
+
+    meta.file_index           = ((uint64_t)info.nFileIndexHigh << 32) | (uint64_t)info.nFileIndexLow;
+    meta.num_links            = info.nNumberOfLinks;
+    meta.volume_serial_number = info.dwVolumeSerialNumber;
+    meta._dwFileAttributes    = info.dwFileAttributes;
+
+    // https://learn.microsoft.com/en-us/windows/win32/fileio/reparse-points
+    if (info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
+    {
+        // Get the reparse tag to decide if it is really a symlink
+        // https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-getfileinformationbyhandleex
+        // https://learn.microsoft.com/en-us/windows/win32/api/minwinbase/ne-minwinbase-file_info_by_handle_class
+        FILE_ATTRIBUTE_TAG_INFO tag_info;
+        ok = GetFileInformationByHandleEx(hFile, FileAttributeTagInfo, &tag_info, sizeof(tag_info));
+        if (ok)
+        {
+            meta._dwReparseTag = tag_info.ReparseTag;
+            if (tag_info.ReparseTag == IO_REPARSE_TAG_SYMLINK || tag_info.ReparseTag == IO_REPARSE_TAG_MOUNT_POINT)
+            {
+                meta.type       = XFILES_METADATA_TYPE_SYMLINK;
+                meta.is_symlink = true;
+            }
+            else
+            {
+                meta.type = (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? XFILES_METADATA_TYPE_DIRECTORY
+                                                                               : XFILES_METADATA_TYPE_FILE;
+            }
+        }
+    }
+    else if (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+    {
+        meta.type = XFILES_METADATA_TYPE_DIRECTORY;
+    }
+    else
+    {
+        meta.type = XFILES_METADATA_TYPE_FILE;
+    }
+
+    meta.is_readonly   = (info.dwFileAttributes & FILE_ATTRIBUTE_READONLY) != 0;
+    meta.is_hidden     = (info.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN) != 0;
+    meta.is_system     = (info.dwFileAttributes & FILE_ATTRIBUTE_SYSTEM) != 0;
+    meta.is_archive    = (info.dwFileAttributes & FILE_ATTRIBUTE_ARCHIVE) != 0;
+    meta.is_compressed = (info.dwFileAttributes & FILE_ATTRIBUTE_COMPRESSED) != 0;
+    meta.is_encrypted  = (info.dwFileAttributes & FILE_ATTRIBUTE_ENCRYPTED) != 0;
+    meta.is_executable = false; // Windows uses ACLs, not a simple bit; best-effort below
+    {
+        // Treat .exe/.bat/.cmd/.com as executable as a convenience heuristic
+        const char* ext = xfiles_get_extension(path);
+        int         c   = ext != NULL ? ext[1] : 0;
+        if (c == 'e' || c == 'E' || c == 'b' || c == 'B' || c == 'c' || c == 'C')
+        {
+            ext++; // increment past "."
+            if (_stricmp(ext, "exe") == 0 || _stricmp(ext, "bat") == 0 || _stricmp(ext, "cmd") == 0 ||
+                _stricmp(ext, "com") == 0)
+            {
+                meta.is_executable = true;
+            }
+        }
+    }
+
+    CloseHandle(hFile);
+    return meta;
 }
 
 void xfiles_list(const char* path, void* data, xfiles_list_callback_t* callback)
@@ -597,7 +791,8 @@ void xfiles_list(const char* path, void* data, xfiles_list_callback_t* callback)
 
     {
         WCHAR PathUnicode[MAX_PATH] = {0};
-        int   n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, PathUnicode, XFILES_ARRLEN(PathUnicode));
+        int   n =
+            MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, PathUnicode, XFILES_ARRLEN(PathUnicode) - 3);
         if (n)
         {
             PathUnicode[n] = 0;
@@ -1333,7 +1528,7 @@ bool xfiles_select_in_file_explorer(const char* path)
     return true;
 }
 
-int xfiles_get_user_directory(char* out, size_t outlen, enum XFILES_USER_DIRECTORY loc)
+int xfiles_get_user_directory(char* out, size_t outlen, XFilesUserDirectory loc)
 {
     static const char* PATHS[] = {
         "",                             // XFILES_USER_DIRECTORY_HOME,

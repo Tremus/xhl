@@ -96,9 +96,9 @@ void xtime_init()
     // https://stackoverflow.com/questions/1695288/getting-the-current-time-in-milliseconds-from-the-system-clock-in-windows#1695332
     FILETIME filetime;
     GetSystemTimeAsFileTime(&filetime);
-    xhl_unixtime_init  = (uint64_t)filetime.dwLowDateTime + ((uint64_t)(filetime.dwHighDateTime) << 32LL);
-    xhl_unixtime_init -= 116444736000000000LL; // convert date from Jan 1, 1601 to Jan 1 1970.
-    xhl_unixtime_init /= 10000LL;              // convert units 100 nanosecods > ms
+    xhl_unixtime_init  = (uint64_t)filetime.dwLowDateTime + ((uint64_t)(filetime.dwHighDateTime) << 32ULL);
+    xhl_unixtime_init -= 116444736000000000ULL; // convert date from Jan 1, 1601 to Jan 1 1970.
+    xhl_unixtime_init /= 10000LL;               // convert units 100 nanosecods > ms
 }
 
 uint64_t xtime_now_ns()
