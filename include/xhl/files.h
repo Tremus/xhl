@@ -260,43 +260,39 @@ typedef struct XFilesMetadata
 
     uint64_t size_bytes;
 
+    // Convenience
+    bool is_readonly;
+    bool is_hidden;
+    bool is_system;
+    bool is_archive;    // Windows only, its for backing up files
+    bool is_compressed; // (UF_COMPRESSED, FILE_ATTRIBUTE_COMPRESSED). Not to be confused with zip/7z/tar/gz/rar
+    bool is_encrypted;
+    bool is_executable; // +x user permissions on posix. Lazy extension checking on Windwos
+    bool is_symlink;
+
     // Unix epoch times in nanoseconds
     uint64_t creation_time_ns;      // File creation time (birthtime / CreationTime)
     uint64_t modification_time_ns;  // Last write time (mtime / LastWriteTime)
     uint64_t access_time_ns;        // Last access time (atime / LastAccessTime)
     uint64_t status_change_time_ns; // POSIX ctime (macOS only, 0 on Windows)
 
+    // Stuff you probably dont want
+
     // Might get rid of this. Can't imagine a use for it
-    uint64_t file_index; // (st_ino / (nFileIndexHigh << 32 | nFileSizeLow))
-    uint32_t num_links;
-    uint32_t volume_serial_number;
+    uint64_t file_index;           // (st_ino / (nFileIndexHigh << 32 | nFileSizeLow))
+    uint32_t num_links;            // (st_nlink / nNumberOfLinks)
+    uint32_t volume_serial_number; // (st_dev / dwVolumeSerialNumber)
 
-    // POSIX-named fields (filled on macOS, mapped/empty on Windows)
-    // uint32_t st_mode;    // File mode bits (POSIX)
-    // uint32_t st_nlink;   // Hard link count
-    // uint32_t st_uid;     // Owner user ID
-    // uint32_t st_gid;     // Owner group ID
-    // uint64_t st_ino;     // Inode number (macOS) / file index (Windows)
-    // uint64_t st_dev;     // Device ID (macOS) / volume serial (Windows)
-    // uint64_t st_rdev;    // Device ID (special files)
-    // uint64_t st_blocks;  // Number of 512-byte blocks allocated
-    // uint32_t st_blksize; // Preferred I/O block size
-    // uint32_t st_flags;   // User-defined flags (macOS BSD flags)
-    // uint32_t st_gen;     // File generation number (macOS)
-
-    // Windows specific fields
+    // Windows fields you might want
     uint32_t _dwFileAttributes; // BY_HANDLE_FILE_INFORMATION.dwFileAttributes
     uint32_t _dwReparseTag;     // FILE_ATTRIBUTE_TAG_INFO.ReparseTag
 
-    // Convenience
-    bool is_readonly;
-    bool is_hidden;
-    bool is_system;
-    bool is_archive;
-    bool is_compressed;
-    bool is_encrypted;
-    bool is_executable;
-    bool is_symlink;
+    // POSIX fields (stat64) you might want
+    uint32_t _st_mode;    // File mode bits (POSIX)
+    uint32_t _st_blksize; // Preferred I/O block size
+    uint64_t _st_blocks;  // Number of 512-byte blocks allocated
+    uint32_t _st_flags;   // User-defined flags (macOS BSD flags)
+    uint32_t _st_gen;     // File generation number (macOS)
 } XFilesMetadata;
 
 XFilesMetadata xfiles_get_metadata(const char* path);
@@ -999,6 +995,7 @@ void xfiles_watch_destroy(xfiles_watch_context_t _ctx)
 
 #ifdef __APPLE__
 #include <dirent.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
@@ -1090,6 +1087,85 @@ bool xfiles_move(const char* from, const char* to) { return 0 == rename(from, to
 
 // https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/unlink.2.html
 bool xfiles_delete(const char* path) { return unlink(path) == 0; }
+
+XFilesMetadata xfiles_get_metadata(const char* path)
+{
+    XFilesMetadata meta = {0};
+
+    if (path == NULL || path[0] == '\0')
+    {
+        meta.last_error = -1;
+        return meta;
+    }
+
+    // https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/stat.2.html
+    struct stat st;
+    // lstat so symlinks are reported as symlinks
+    if (lstat(path, &st) != 0)
+    {
+        meta.last_error = (int32_t)errno;
+        return meta;
+    }
+
+    // Unified fields
+    meta.size_bytes       = (uint64_t)st.st_size;
+    meta.creation_time_ns = (uint64_t)st.st_birthtimespec.tv_sec * 1000000000LL + (uint64_t)st.st_birthtimespec.tv_nsec;
+    meta.modification_time_ns  = (uint64_t)st.st_mtimespec.tv_sec * 1000000000LL + (uint64_t)st.st_mtimespec.tv_nsec;
+    meta.access_time_ns        = (uint64_t)st.st_atimespec.tv_sec * 1000000000LL + (uint64_t)st.st_atimespec.tv_nsec;
+    meta.status_change_time_ns = (uint64_t)st.st_ctimespec.tv_sec * 1000000000LL + (uint64_t)st.st_ctimespec.tv_nsec;
+    meta.file_index            = st.st_ino;
+    meta.num_links             = st.st_nlink;
+    meta.volume_serial_number  = st.st_dev;
+
+    meta._st_mode    = st.st_mode;
+    meta._st_blksize = st.st_blksize;
+    meta._st_blocks  = st.st_blocks;
+    meta._st_flags   = st.st_flags;
+    meta._st_gen     = st.st_gen;
+
+    // Determine type
+    if (S_ISREG(st.st_mode))
+    {
+        meta.type = XFILES_METADATA_TYPE_FILE;
+    }
+    else if (S_ISDIR(st.st_mode))
+    {
+        meta.type = XFILES_METADATA_TYPE_DIRECTORY;
+    }
+    else if (S_ISLNK(st.st_mode))
+    {
+        meta.type = XFILES_METADATA_TYPE_SYMLINK;
+    }
+    else if (S_ISBLK(st.st_mode))
+    {
+        meta.type = XFILES_METADATA_TYPE_BLOCK_DEVICE;
+    }
+    else if (S_ISCHR(st.st_mode))
+    {
+        meta.type = XFILES_METADATA_TYPE_CHAR_DEVICE;
+    }
+    else if (S_ISFIFO(st.st_mode))
+    {
+        meta.type = XFILES_METADATA_TYPE_FIFO;
+    }
+    else if (S_ISSOCK(st.st_mode))
+    {
+        meta.type = XFILES_METADATA_TYPE_SOCKET;
+    }
+
+    // Convenience boolean flags (BSD-style)
+    // st_flags on macOS: UF_HIDDEN, UF_IMMUTABLE, UF_COMPRESSED, etc.
+    meta.is_readonly   = ((st.st_mode & 0222) == 0);       // no write bits for anyone
+    meta.is_hidden     = (st.st_flags & 0x00008000u) != 0; // UF_HIDDEN
+    meta.is_system     = (st.st_flags & 0x00080000u) != 0; // SF_RESTRICTED, rough analogue
+    meta.is_archive    = false;                            // No direct analogue on macOS
+    meta.is_compressed = (st.st_flags & 0x00000020u) != 0; // UF_COMPRESSED
+    meta.is_encrypted  = false;                            // FileVault is volume-level; per-file is not stable here
+    meta.is_executable = (st.st_mode & 0111) != 0;
+    meta.is_symlink    = S_ISLNK(st.st_mode) ? true : false;
+
+    return meta;
+}
 
 void xfiles_list(const char* path, void* data, xfiles_list_callback_t* callback)
 {
