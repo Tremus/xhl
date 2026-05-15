@@ -188,8 +188,8 @@ uint32_t xm_popcountu(uint32_t x);
 uint32_t xm_popcountull(uint64_t x);
 
 // https://en.wikipedia.org/wiki/Xorshift
-uint32_t xm_xorshift32(uint32_t x);
-uint64_t xm_xorshift64(uint64_t x);
+static inline uint32_t xm_xorshift32(uint32_t x);
+static inline uint64_t xm_xorshift64(uint64_t x);
 
 typedef union xm_fi32
 {
@@ -344,6 +344,22 @@ xm_complexf xm_cdivf(float a_re, float a_im, float b_re, float b_im)
     c.real = (a_re * b_re + a_im * b_im) / (b_re * b_re + b_im * b_im);
     c.imag = (a_im * b_re - a_re * b_im) / (b_re * b_re + b_im * b_im);
     return c;
+}
+
+uint32_t xm_xorshift32(uint32_t x)
+{
+    /* Algorithm "xor" from p. 4 of Marsaglia, "Xorshift RNGs" */
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    return x;
+}
+uint64_t xm_xorshift64(uint64_t x)
+{
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    return x;
 }
 
 #ifdef __cplusplus
@@ -670,22 +686,6 @@ uint32_t xm_popcountull(uint64_t x) { return __popcnt64(x); }
 #else
 #error Unknown compiler!
 #endif
-
-uint32_t xm_xorshift32(uint32_t x)
-{
-    /* Algorithm "xor" from p. 4 of Marsaglia, "Xorshift RNGs" */
-    x ^= x << 13;
-    x ^= x >> 17;
-    x ^= x << 5;
-    return x;
-}
-uint64_t xm_xorshift64(uint64_t x)
-{
-    x ^= x << 13;
-    x ^= x >> 7;
-    x ^= x << 17;
-    return x;
-}
 
 /* https://github.com/romeric/fastapprox/blob/master/fastapprox/COPYING
 
