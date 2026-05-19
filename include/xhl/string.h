@@ -49,6 +49,8 @@ bool xtr_imatch2(const char* a, int alen, const char* b, int blen);
 // Simiar to strchr, only it NEVER returns NULL. If it fails, it returns the string at the terminating NULL char
 const char* xtr_find_character(const char* str, char chr);
 
+void xtr_to_uppercase_ansi(char* str);
+
 // Uses Natural Sort Order algorithm
 // https://en.wikipedia.org/wiki/Natural_sort_order
 int xtr_compare_natural(char const* a, char const* b, unsigned case_insensitive);
@@ -335,6 +337,15 @@ const char* xtr_find_character(const char* str, char c)
         str++;
     }
     return str;
+}
+
+void xtr_to_uppercase_ansi(char* str)
+{
+    while (*str != 0)
+    {
+        *str = xtr_char_to_upper(*str);
+        str++;
+    }
 }
 
 static inline ptrdiff_t _xtr_has_zero(ptrdiff_t x) { return (x)-0x101010101010101 & ~(x) & 0x8080808080808080; }
