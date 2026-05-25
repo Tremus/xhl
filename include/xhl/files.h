@@ -62,7 +62,7 @@ void ctrl_c_callback(int code)
     g_running = 0;
 }
 
-void my_cb(enum XFILES_WATCH_TYPE type, const char* path, void* udata)
+void cb_onfilechange(enum XFILES_WATCH_TYPE type, const char* path, void* udata)
 {
     switch (type)
     {
@@ -89,10 +89,10 @@ int main()
     g_running = 1;
     signal(SIGINT, ctrl_c_callback);
     // setup event queue
-    xfiles_watch_context_t ctx = xfiles_watch_create("/path/to/directory", NULL, my_cb);
+    xfiles_watch_context_t ctx = xfiles_watch_create("/path/to/directory", NULL, cb_onfilechange);
     while (g_running)
     {
-        xfiles_watch_flush(ctx); // poll for items in queue, trigger my_cb()
+        xfiles_watch_flush(ctx); // poll for items in queue, trigger cb_onfilechange()
         Sleep(50); // Windows, sleep 50ms
         usleep(50000) // Unix, sleep 50ms
     }
@@ -108,7 +108,7 @@ int main()
 #include <stdio.h>
 #include <xhl/files.h>
 
-void my_cb(void* data, const xfiles_list_item_t* item)
+void cb_onfile(void* data, const xfiles_list_item_t* item)
 {
     const char* name = item->path + item->name_idx;
     if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0)
@@ -117,7 +117,7 @@ void my_cb(void* data, const xfiles_list_item_t* item)
     fprintf(stderr, "Entry: %s\n", item->path);
     if (item->is_dir)
     {
-        xfiles_list(item->path, data, my_cb);
+        xfiles_list(item->path, data, cb_onfile);
     }
     else
     {
@@ -129,7 +129,7 @@ void my_cb(void* data, const xfiles_list_item_t* item)
 int main()
 {
     int file_counter = 0;
-    xfiles_list("/path/to/directory", &file_counter, my_cb);
+    xfiles_list("/path/to/directory", &file_counter, cb_onfile);
     fprintf(stderr, "Found %d files\n", file_counter);
     return 0;
 }
