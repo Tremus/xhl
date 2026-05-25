@@ -382,9 +382,20 @@ bool xfiles_create_directory(const char* path)
     XFILES_ASSERT(num);
     if (num)
     {
-        BOOL ok = CreateDirectoryW(DirPath, 0);
-        XFILES_ASSERT(ok);
-        return ok;
+        BOOL ret = CreateDirectoryW(DirPath, 0);
+
+        if (ret) // any non-zero is a success
+        {
+            return true;
+        }
+        else
+        {
+            DWORD err = GetLastError();
+            if (err == ERROR_ALREADY_EXISTS)
+                return true; // close enough to "created a directory"
+            if (err == ERROR_PATH_NOT_FOUND)
+                return false;
+        }
     }
     return false;
 }
