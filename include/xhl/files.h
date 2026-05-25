@@ -190,7 +190,7 @@ const char* xfiles_get_extension(const char* name);
 bool xfiles_exists(const char* path);
 // Returns true if directory, false in any other case
 bool xfiles_is_directory(const char* path);
-// Returns true if directory was created
+// Returns true if directory was created, or if it already exists
 bool xfiles_create_directory(const char* path);
 // Creates directory and any required parent directories, then returns true if the exists or was craeted.
 bool xfiles_create_directory_recursive(const char* path);
@@ -1048,7 +1048,18 @@ bool xfiles_is_directory(const char* path)
 }
 
 // https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/mkdir.2.html
-bool xfiles_create_directory(const char* path) { return mkdir(path, 0777) == 0; }
+bool xfiles_create_directory(const char* path)
+{
+    int ret = mkdir(path, 0777);
+    if (ret != 0)
+    {
+        int err = errno;
+        XFILES_ASSERT(err == EEXIST);
+        if (err == EEXIST)
+            return true;
+    }
+    return ret == 0;
+}
 
 bool xfiles_read(const char* path, void** out, size_t* outlen)
 {
