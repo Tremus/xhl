@@ -11,10 +11,11 @@
 #define XCOMP_ASSERT(...)
 #else // !NDEBUG
 
+static int _xcomp_debugbreak_helper = 0;
 #ifdef _WIN32
-#define XCOMP_ASSERT(cond) (cond) ? (void)0 : __debugbreak()
+#define XCOMP_ASSERT(cond) (cond) ? (void)0 : (__debugbreak(), _xcomp_debugbreak_helper += 0)
 #else
-#define XCOMP_ASSERT(cond) (cond) ? (void)0 : __builtin_debugtrap()
+#define XCOMP_ASSERT(cond) (cond) ? (void)0 : (__builtin_debugtrap(), _xcomp_debugbreak_helper += 0)
 #endif
 
 #endif
@@ -213,7 +214,7 @@ typedef struct xcomp_root
     xcomp_component* mouse_over;
     xcomp_component* mouse_left_down;
     xcomp_component* mouse_last_left_click;
-    uint32_t         last_left_click_time;
+    uint32_t         last_left_click_time_ms;
     uint32_t         left_click_counter;
     xcomp_component* mouse_right_down;
     xcomp_component* mouse_middle_down;
@@ -449,6 +450,9 @@ void xcomp_set_size(xcomp_component* comp, float width, float height)
 
 void xcomp_add_child(xcomp_component* comp, xcomp_component* child)
 {
+    XCOMP_ASSERT(comp);
+    XCOMP_ASSERT(child);
+    XCOMP_ASSERT(comp->children);
     comp->children[comp->num_children] = child;
     child->parent                      = comp;
     comp->num_children++;
@@ -456,6 +460,11 @@ void xcomp_add_child(xcomp_component* comp, xcomp_component* child)
 
 void xcomp_remove_child(xcomp_component* comp, xcomp_component* child)
 {
+    XCOMP_ASSERT(xcomp_ptr_valid(comp));
+    XCOMP_ASSERT(xcomp_ptr_valid(child));
+    if (!xcomp_ptr_valid(comp) || !xcomp_ptr_valid(child))
+        return;
+
     bool child_was_removed = false;
 
     size_t i = comp->num_children;
@@ -536,11 +545,12 @@ xcomp_component* xcomp_find_child_at(xcomp_component* comp, xcomp_position p)
 xcomp_component* xcomp_find_parent_at(xcomp_component* comp, xcomp_position p)
 {
     xcomp_component* parent = xcomp_ptr_valid(comp) ? comp->parent : NULL;
-    while (parent != NULL)
+    while (xcomp_ptr_valid(parent))
     {
         bool hit = xcomp_hit_test(parent->dimensions, p);
         if (hit)
             break;
+        parent = parent->parent;
     }
 
     return parent;
@@ -548,6 +558,8 @@ xcomp_component* xcomp_find_parent_at(xcomp_component* comp, xcomp_position p)
 
 void xcomp_send_event_to_children_recursive(xcomp_component* comp, uint32_t ev_type, xcomp_event_data info)
 {
+    if (!xcomp_ptr_valid(comp))
+        return;
     xcomp_send_event(comp, ev_type, info);
     for (int i = 0; i < comp->num_children; i++)
         xcomp_send_event_to_children_recursive(comp->children[i], ev_type, info);
@@ -772,16 +784,24 @@ void xcomp_send_mouse_up(xcomp_root* root, xcomp_event_data info, uint32_t time_
         if (last_comp == comp && !dragging)
         {
             XCOMP_ASSERT(comp);
-            uint32_t diff = time_ms - root->last_left_click_time;
+            XCOMP_ASSERT(time_ms > root->last_left_click_time_ms);
+            if (time_ms < root->last_left_click_time_ms)
+            {
+                // Integer overflow? Has the program been running for 49 days?
+                time_ms                       = 0;
+                root->last_left_click_time_ms = 0;
+            }
+
+            uint32_t diff = time_ms - root->last_left_click_time_ms;
 
             if (root->mouse_last_left_click != last_comp)
                 root->left_click_counter = 0;
-            if (diff > double_click_interval_ms)
+            if (diff > (int)double_click_interval_ms)
                 root->left_click_counter = 0;
 
             root->left_click_counter++;
-            root->last_left_click_time  = time_ms;
-            root->mouse_last_left_click = comp;
+            root->last_left_click_time_ms = time_ms;
+            root->mouse_last_left_click   = comp;
 
             uint32_t clicks = root->left_click_counter % 3;
             if (clicks == 0)
@@ -844,14 +864,14 @@ void xcomp_root_clear(xcomp_root* root)
     xcomp_component* last_mouse_drag_over   = root->mouse_drag_over;
     xcomp_event_data edata                  = {.x = root->position.x, .y = root->position.y, .modifiers = 0};
 
-    root->mouse_over            = NULL;
-    root->mouse_left_down       = NULL;
-    root->mouse_last_left_click = NULL;
-    root->last_left_click_time  = 0;
-    root->left_click_counter    = 0;
-    root->mouse_right_down      = NULL;
-    root->mouse_middle_down     = NULL;
-    root->mouse_drag_over       = NULL;
+    root->mouse_over              = NULL;
+    root->mouse_left_down         = NULL;
+    root->mouse_last_left_click   = NULL;
+    root->last_left_click_time_ms = 0;
+    root->left_click_counter      = 0;
+    root->mouse_right_down        = NULL;
+    root->mouse_middle_down       = NULL;
+    root->mouse_drag_over         = NULL;
 
     xcomp_root_give_keyboard_focus(root, NULL);
 
