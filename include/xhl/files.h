@@ -424,7 +424,16 @@ bool xfiles_read(const char* path, void** out, size_t* outlen)
             OPEN_EXISTING,
             FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN,
             NULL);
-        XFILES_ASSERT(hFile != INVALID_HANDLE_VALUE);
+        if (hFile == INVALID_HANDLE_VALUE)
+        {
+            int err = GetLastError();
+            if (err == ERROR_ACCESS_DENIED)
+            {
+                // NOTE: you may get this error when trying to "read" a directory. Check if a directory already exists
+                // at this path
+            }
+            XFILES_ASSERT(hFile != INVALID_HANDLE_VALUE);
+        }
         if (hFile != INVALID_HANDLE_VALUE)
         {
             ok = GetFileSizeEx(hFile, &FileSize);
@@ -474,7 +483,16 @@ bool xfiles_write(const char* path, const void* in, size_t inlen)
             CREATE_ALWAYS,
             FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN,
             NULL);
-        XFILES_ASSERT(hFile != INVALID_HANDLE_VALUE);
+        if (hFile == INVALID_HANDLE_VALUE)
+        {
+            int err = GetLastError();
+            if (err == ERROR_ACCESS_DENIED)
+            {
+                // NOTE: you may get this error when trying to "write" to a directory. Check if a directory already
+                // exists at this path
+            }
+            XFILES_ASSERT(hFile != INVALID_HANDLE_VALUE);
+        }
         if (hFile != INVALID_HANDLE_VALUE)
         {
             ok = WriteFile(hFile, in, inlen, &nBytesWritten, NULL);
