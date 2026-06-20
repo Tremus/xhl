@@ -27,6 +27,19 @@ typedef struct XDate
 XDate xtime_get_date(uint64_t unix_ms);
 void  xtime_sleep_ms(uint32_t ms);
 
+typedef void (*xtime_timer_cb)(void* user_data);
+
+typedef struct
+{
+    xtime_timer_cb callback;
+    void*          user_data;
+    void*          _platform; // CFRunLoopTimerRef on macOS; HWND on Windows
+} XTimer;
+
+// Warning: only call these from the main thread
+void xtime_timer_start(XTimer* t, uint32_t interval_ms, xtime_timer_cb cb, void* user_data);
+void xtime_timer_stop(XTimer* t);
+
 #ifndef NDEBUG
 // Quick an dirty performance timer that won't show up in release. Should be thread safe.
 void xtime_stopwatch_start();
@@ -43,6 +56,7 @@ void xtime_stopwatch_log_ms(const char* msg_prefix); // Resets stopwatch
 
 #ifdef XHL_TIME_IMPL
 #undef XHL_TIME_IMPL
+#include <string.h>
 
 XDate xtime_get_date(uint64_t unix_ms)
 {
@@ -116,6 +130,69 @@ uint64_t xtime_now_ns()
 
 void xtime_sleep_ms(uint32_t ms) { Sleep(ms); }
 
+// Unfortunately we can't pass user data to SetTiner on Windows. This would be much cleaner an simpler
+// Slots should work fine, because in real world scenarios (when building audio plugins) this will only be called on the
+// main thread
+#ifndef XTIME_NUM_TIMERS
+#define XTIME_NUM_TIMERS 32
+#endif // XTIME_NUM_TIMERS
+
+struct XTimerSlot
+{
+    UINT_PTR id;
+    XTimer*  timer;
+};
+struct XTimerSlot G_XTIMERS[XTIME_NUM_TIMERS] = {0};
+
+static void CALLBACK _xtime_timer_proc(HWND h, UINT m, UINT_PTR id, DWORD ms)
+{
+    for (int i = 0; i < XTIME_NUM_TIMERS; i++)
+    {
+        struct XTimerSlot* slot = &G_XTIMERS[i];
+        if (slot->id == id)
+        {
+            XTimer* t = slot->timer;
+            t->callback(t->user_data);
+            break;
+        }
+    }
+}
+
+void xtime_timer_start(XTimer* t, uint32_t interval_ms, xtime_timer_cb cb, void* user_data)
+{
+    for (int i = 0; i < XTIME_NUM_TIMERS; i++)
+    {
+        struct XTimerSlot* slot = &G_XTIMERS[i];
+        if (slot->timer == NULL)
+        {
+            t->callback  = cb;
+            t->user_data = user_data;
+            // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-settimer
+            t->_platform = (void*)SetTimer(NULL, 0, interval_ms, (TIMERPROC)_xtime_timer_proc);
+
+            slot->id    = (UINT_PTR)t->_platform;
+            slot->timer = t;
+            break;
+        }
+    }
+}
+
+void xtime_timer_stop(XTimer* t)
+{
+    for (int i = 0; i < XTIME_NUM_TIMERS; i++)
+    {
+        struct XTimerSlot* slot = &G_XTIMERS[i];
+        if (slot->timer == t)
+        {
+            // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-killtimer
+            KillTimer(NULL, (UINT_PTR)t->_platform);
+            memset(t, 0, sizeof(*t));
+            memset(slot, 0, sizeof(*slot));
+            break;
+        }
+    }
+}
+
 #elif defined(__APPLE__) // endif _WIN32
 #include <CoreFoundation/CoreFoundation.h>
 #include <mach/mach_time.h>
@@ -145,6 +222,37 @@ uint64_t xtime_now_ns()
 }
 
 void xtime_sleep_ms(uint32_t ms) { usleep((useconds_t)ms * 1000); }
+
+static void _xtime_timer_proc(CFRunLoopTimerRef ref, void* info)
+{
+    XTimer* t = (XTimer*)info;
+    t->callback(t->user_data);
+}
+
+void xtime_timer_start(XTimer* t, uint32_t interval_ms, xtime_timer_cb cb, void* user_data)
+{
+    t->callback                        = cb;
+    t->user_data                       = user_data;
+    double                interval_sec = (double)interval_ms / 1000.0;
+    CFRunLoopTimerContext ctx          = {0, t, NULL, NULL, NULL};
+
+    t->_platform = CFRunLoopTimerCreate(
+        NULL,
+        CFAbsoluteTimeGetCurrent() + interval_sec,
+        interval_sec,
+        0,
+        0,
+        _xtime_timer_proc,
+        &ctx);
+    CFRunLoopAddTimer(CFRunLoopGetCurrent(), (CFRunLoopTimerRef)t->_platform, kCFRunLoopCommonModes);
+}
+
+void xtime_timer_stop(XTimer* t)
+{
+    CFRunLoopTimerInvalidate((CFRunLoopTimerRef)t->_platform);
+    CFRelease((CFRunLoopTimerRef)t->_platform);
+    memset(t, 0, sizeof(*t));
+}
 
 #endif // __APPLE__
 
