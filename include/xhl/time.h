@@ -25,6 +25,7 @@ typedef struct XDate
 } XDate;
 
 XDate xtime_get_date(uint64_t unix_ms);
+void  xtime_sleep_ms(uint32_t ms);
 
 #ifndef NDEBUG
 // Quick an dirty performance timer that won't show up in release. Should be thread safe.
@@ -113,9 +114,12 @@ uint64_t xtime_now_ns()
     return q * 1000000000 + r * 1000000000 / xhl_perffreq.QuadPart;
 }
 
+void xtime_sleep_ms(uint32_t ms) { Sleep(ms); }
+
 #elif defined(__APPLE__) // endif _WIN32
 #include <CoreFoundation/CoreFoundation.h>
 #include <mach/mach_time.h>
+#include <unistd.h>
 
 mach_timebase_info_data_t xhl_timebase;
 uint64_t                  xhl_start_machtime;
@@ -139,6 +143,8 @@ uint64_t xtime_now_ns()
     return (diff / xhl_timebase.denom) * xhl_timebase.numer +
            (diff % xhl_timebase.denom) * xhl_timebase.numer / xhl_timebase.denom;
 }
+
+void xtime_sleep_ms(uint32_t ms) { usleep((useconds_t)ms * 1000); }
 
 #endif // __APPLE__
 
