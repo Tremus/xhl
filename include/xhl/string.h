@@ -68,6 +68,9 @@ unsigned xtr_fmt(char* const buf, ptrdiff_t const cap, ptrdiff_t const offset, c
 #define xfmt(buf, offset, fmt, ...) xtr_fmt(buf, sizeof(buf), offset, fmt, __VA_ARGS__)
 ptrdiff_t xtr_fmt_va(char* text, ptrdiff_t max_len, char const* fmt, va_list va);
 
+uint64_t xtr_str_to_u64(char const* str, char** end_ptr, int base);
+int64_t  xtr_str_to_i64(char const* str, char** end_ptr, int base);
+
 #ifdef __cplusplus
 }
 #endif
@@ -447,6 +450,65 @@ static inline void xtr_str_to_upper(char* str)
         *str = xtr_char_to_upper(*str);
         str++;
     }
+}
+
+ptrdiff_t _xtr_scan_u64(char const* text, int base, uint64_t* value)
+{
+    char const* text_begin = text;
+    uint64_t    result     = 0;
+
+    if (base == 16 && xtr_strncmp(text, "0x", 2) == 0)
+    {
+        text += 2;
+    }
+
+    for (;;)
+    {
+        uint64_t v;
+        if (xtr_char_is_digit(*text))
+        {
+            v = *text - '0';
+        }
+        else if (base == 16 && xtr_char_is_hex_digit(*text))
+        {
+            v = xtr_hex_digit_to_int(*text);
+        }
+        else
+        {
+            break;
+        }
+
+        result *= base;
+        result += v;
+        text++;
+    }
+
+    if (value)
+        *value = result;
+    return (text - text_begin);
+}
+
+uint64_t xtr_str_to_u64(char const* str, char** end_ptr, int base)
+{
+    ptrdiff_t len;
+    uint64_t  value = 0;
+
+    if (!base)
+    {
+        if ((xtr_strlen(str) > 2) && (xtr_strncmp(str, "0x", 2) == 0))
+        {
+            base = 16;
+        }
+        else
+        {
+            base = 10;
+        }
+    }
+
+    len = _xtr_scan_u64(str, base, &value);
+    if (end_ptr)
+        *end_ptr = (char*)str + len;
+    return value;
 }
 
 ptrdiff_t _xtr_scan_i64(char const* text, int base, int64_t* value)
