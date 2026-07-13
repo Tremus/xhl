@@ -59,7 +59,6 @@ static inline double xm_normd(double v, double start, double end) { return (v - 
 // clang-format on
 
 int xm_droundi(double v);
-int xm_dfloori(double v);
 
 /*i*i*i*i*i*
  i Complex i
@@ -382,17 +381,6 @@ int xm_droundi(double d)
     };
     union Cast c;
     c.d = d + 6755399441055744.0;
-    return c.i[0];
-}
-int xm_dfloori(double d)
-{
-    union Cast
-    {
-        double d;
-        int    i[2];
-    };
-    union Cast c;
-    c.d = d + 6755399441055743.5;
     return c.i[0];
 }
 
