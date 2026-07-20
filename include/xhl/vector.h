@@ -85,9 +85,10 @@ typedef union
 
 typedef union
 {
-    struct { float x, y, width, height; };
+    struct { float x, y, w, h; };
     struct { float r, g, b, a; };
     struct { xvec2f position, size; };
+    struct { xvec2f pos; float width, height; };
     float data[4];
 } xvec4f;
 
