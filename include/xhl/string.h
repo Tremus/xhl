@@ -71,6 +71,33 @@ ptrdiff_t xtr_fmt_va(char* text, ptrdiff_t max_len, char const* fmt, va_list va)
 uint64_t xtr_str_to_u64(char const* str, char** end_ptr, int base);
 int64_t  xtr_str_to_i64(char const* str, char** end_ptr, int base);
 
+// FNV-1a
+static uint32_t xtr_hash32(const char* str);
+static uint64_t xtr_hash64(const char* str);
+
+// Inline?
+static uint32_t xtr_hash32(const char* str)
+{
+    uint32_t hash = 2166136261U; // 32-bit FNV offset basis
+    while (*str)
+    {
+        hash ^= (uint8_t)*str++;
+        hash *= 16777619U; // 32-bit FNV prime
+    }
+    return hash;
+}
+
+static uint64_t xtr_hash64(const char* str)
+{
+    uint64_t hash = 14695981039346656037ULL; // FNV offset basis
+    while (*str)
+    {
+        hash ^= (uint8_t)*str++;
+        hash *= 1099511628211ULL; // FNV prime
+    }
+    return hash;
+}
+
 #ifdef __cplusplus
 }
 #endif
