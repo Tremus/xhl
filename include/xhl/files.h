@@ -203,6 +203,35 @@ bool xfiles_create_directory_recursive(const char* path);
 bool xfiles_read(const char* path, void** out, size_t* outlen);
 // Frees a file's contents allocated with xfiles_read()
 void xfiles_free(void* data);
+
+typedef struct XFilesStream
+{
+    union
+    {
+        void* _win32_HANDLE;
+        int   _posix_fd;
+    };
+    uint64_t size;
+    uint64_t pos;
+    bool     is_open;
+    int      error;
+} XFilesStream;
+
+typedef enum XFilesSeekOrigin
+{
+    XFILES_SEEK_BEGIN,   // relative to the start of the file
+    XFILES_SEEK_CURRENT, // relative to the current position
+    XFILES_SEEK_END,     // relative to the end of the file
+} XFilesSeekOrigin;
+
+// Opens a file for streamed reading. Returns NULL on failure. Release with xfiles_stream_close()
+XFilesStream xfiles_stream_open(const char* path);
+void         xfiles_stream_close(XFilesStream* stream);
+
+// -1 on error. 0 on EOF, else number of bytes actually read. Blocking
+int64_t xfiles_stream_read(XFilesStream* stream, void* out, size_t num_bytes);
+bool    xfiles_stream_seek(XFilesStream* stream, int64_t offset, XFilesSeekOrigin origin);
+
 // Creates file if it doesn't exist with default access permissions.
 // If file already exists, it overwrites all contents.
 bool xfiles_write(const char* path, const void* in, size_t inlen);
@@ -476,6 +505,97 @@ bool xfiles_read(const char* path, void** out, size_t* outlen)
         }
     }
 
+    return ok;
+}
+
+XFilesStream xfiles_stream_open(const char* path)
+{
+    // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew
+    // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getfilesizeex
+
+    XFilesStream stream = {._win32_HANDLE = INVALID_HANDLE_VALUE};
+
+    WCHAR FileName[MAX_PATH];
+    int   num = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, FileName, XFILES_ARRLEN(FileName));
+    XFILES_ASSERT(num);
+    if (num)
+    {
+        DWORD dwFlagsAndAttributes = FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN;
+        stream._win32_HANDLE =
+            CreateFileW(FileName, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, dwFlagsAndAttributes, NULL);
+        XFILES_ASSERT(stream._win32_HANDLE != INVALID_HANDLE_VALUE);
+    }
+
+    if (stream._win32_HANDLE != INVALID_HANDLE_VALUE)
+    {
+        LARGE_INTEGER FileSize = {0};
+        BOOL          ok       = GetFileSizeEx(stream._win32_HANDLE, &FileSize);
+        XFILES_ASSERT(ok);
+        if (ok)
+        {
+            stream.size = (uint64_t)FileSize.QuadPart;
+        }
+        else
+        {
+            ok = CloseHandle(stream._win32_HANDLE);
+            XFILES_ASSERT(ok);
+            stream._win32_HANDLE = INVALID_HANDLE_VALUE;
+        }
+    }
+    else
+    {
+        stream->error = GetLastError();
+    }
+    stream.is_open = stream._win32_HANDLE != INVALID_HANDLE_VALUE;
+
+    return stream;
+}
+
+void xfiles_stream_close(XFilesStream* stream)
+{
+    if (stream->is_open)
+    {
+        BOOL ok = CloseHandle(stream->_win32_HANDLE);
+        XFILES_ASSERT(ok);
+        if (ok)
+        {
+            stream->_win32_HANDLE = INVALID_HANDLE_VALUE;
+            stream->is_open       = false;
+        }
+    }
+}
+
+int64_t xfiles_stream_read(XFilesStream* stream, void* out, size_t nbytes)
+{
+    if (!stream->is_open)
+        return -1;
+
+    // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-readfile
+    DWORD nread = 0;
+    BOOL  ok    = ReadFile(stream->_win32_HANDLE, out, (DWORD)nbytes, &nread, NULL);
+    XFILES_ASSERT(ok);
+    if (!ok)
+        return -1;
+
+    stream->pos += nread;
+    return (int64_t)nread;
+}
+
+bool xfiles_stream_seek(XFilesStream* stream, int64_t offset, XFilesSeekOrigin origin)
+{
+    // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-setfilepointerex
+    _Static_assert(FILE_BEGIN == XFILES_SEEK_BEGIN, "");
+    _Static_assert(FILE_CURRENT == XFILES_SEEK_CURRENT, "");
+    _Static_assert(FILE_END == XFILES_SEEK_END, "");
+
+    LARGE_INTEGER liOffset;
+    LARGE_INTEGER liNewPos = {0};
+    liOffset.QuadPart      = offset;
+
+    BOOL ok = SetFilePointerEx(stream->_win32_HANDLE, liOffset, &liNewPos, origin);
+    XFILES_ASSERT(ok);
+    if (ok)
+        stream->pos = (uint64_t)liNewPos.QuadPart;
     return ok;
 }
 
@@ -1147,6 +1267,92 @@ bool xfiles_read(const char* path, void** out, size_t* outlen)
     }
 
     return nread != -1;
+}
+
+XFilesStream xfiles_stream_open(const char* path)
+{
+    // https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/open.2.html
+    // https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/fstat.2.html
+    // https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/close.2.html
+
+    XFilesStream stream = {._posix_fd = -1};
+
+    stream._posix_fd = open(path, O_RDONLY);
+    XFILES_ASSERT(stream._posix_fd != -1);
+    if (stream._posix_fd != -1)
+    {
+        struct stat info = {0};
+        int         ret  = fstat(stream._posix_fd, &info);
+        XFILES_ASSERT(ret != -1);
+        if (ret != -1)
+        {
+            stream.size = (uint64_t)info.st_size;
+        }
+        else
+        {
+            close(stream._posix_fd);
+            stream._posix_fd = -1;
+        }
+    }
+    else
+    {
+        stream.error = errno;
+    }
+    stream.is_open = stream._posix_fd >= 0;
+
+    return stream;
+}
+
+void xfiles_stream_close(XFilesStream* stream)
+{
+    // https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/close.2.html
+    if (stream->is_open)
+    {
+        int ret = close(stream->_posix_fd);
+        if (ret != -1)
+        {
+            stream->_posix_fd = -1;
+            stream->is_open   = false;
+        }
+        else
+        {
+            stream->error = errno;
+        }
+    }
+}
+
+int64_t xfiles_stream_read(XFilesStream* stream, void* out, size_t nbytes)
+{
+    if (!stream->is_open)
+        return -1;
+    // https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/read.2.html
+    ssize_t nread = read(stream->_posix_fd, out, nbytes);
+    XFILES_ASSERT(nread != -1);
+    if (nread == -1)
+    {
+        stream->error = errno;
+        return -1;
+    }
+
+    stream->pos += (uint64_t)nread;
+    return (int64_t)nread;
+}
+
+bool xfiles_stream_seek(XFilesStream* stream, int64_t offset, XFilesSeekOrigin origin)
+{
+    // https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/lseek.2.html
+    // NOTE: SEEK_SET, SEEK_CUR & SEEK_END match XFilesSeekOrigin
+    _Static_assert(SEEK_SET == XFILES_SEEK_BEGIN, "");
+    _Static_assert(SEEK_CUR == XFILES_SEEK_CURRENT, "");
+    _Static_assert(SEEK_END == XFILES_SEEK_END, "");
+
+    off_t newpos = lseek(stream->_posix_fd, (off_t)offset, origin);
+    XFILES_ASSERT(newpos != -1);
+    if (newpos == -1)
+        return false;
+
+    stream->pos = (uint64_t)newpos;
+    return true;
 }
 
 bool xfiles_write(const char* path, const void* in, size_t inlen)
