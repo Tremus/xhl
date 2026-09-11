@@ -544,7 +544,7 @@ XFilesStream xfiles_stream_open(const char* path)
     }
     else
     {
-        stream->error = GetLastError();
+        stream.error = GetLastError();
     }
     stream.is_open = stream._win32_HANDLE != INVALID_HANDLE_VALUE;
 
