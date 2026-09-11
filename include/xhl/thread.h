@@ -19,6 +19,19 @@
 #define XTHREAD_LOCAL _Thread_local
 #endif
 
+#ifdef _WIN32
+#define xthread_debugbreak() __debugbreak()
+#else
+#define xthread_debugbreak() __builtin_debugtrap()
+#endif
+
+#ifdef NDEBUG
+#define xthread_assert(...)
+#else
+static int _xthread_break_helper = 0;
+#define xthread_assert(cond) (((cond) ? (void)0 : xthread_debugbreak()), _xthread_break_helper += 0)
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -170,6 +183,113 @@ int8_t   xt_atomic_compare_exchange_i8 (xt_atomic_int8_t*   ptr, int8_t   expect
 int16_t  xt_atomic_compare_exchange_i16(xt_atomic_int16_t*  ptr, int16_t  expected, int16_t  desired);
 int32_t  xt_atomic_compare_exchange_i32(xt_atomic_int32_t*  ptr, int32_t  expected, int32_t  desired);
 int64_t  xt_atomic_compare_exchange_i64(xt_atomic_int64_t*  ptr, int64_t  expected, int64_t  desired);
+
+// Ordered variants: explicit memory order instead of the implicit seq_cst used above.
+// On GCC/Clang these map straight onto __atomic_*; on MSVC every op is already a full
+// fence, so the order argument is accepted but ignored.
+#if defined(_MSC_VER) && !defined(__clang__)
+
+static inline uint8_t  xt_atomic_load_u8_ordered (const xt_atomic_uint8_t*  ptr, enum xt_memory_order order) { (void)order; return xt_atomic_load_u8(ptr); }
+static inline uint16_t xt_atomic_load_u16_ordered(const xt_atomic_uint16_t* ptr, enum xt_memory_order order) { (void)order; return xt_atomic_load_u16(ptr); }
+static inline uint32_t xt_atomic_load_u32_ordered(const xt_atomic_uint32_t* ptr, enum xt_memory_order order) { (void)order; return xt_atomic_load_u32(ptr); }
+static inline uint64_t xt_atomic_load_u64_ordered(const xt_atomic_uint64_t* ptr, enum xt_memory_order order) { (void)order; return xt_atomic_load_u64(ptr); }
+static inline int8_t   xt_atomic_load_i8_ordered (const xt_atomic_int8_t*   ptr, enum xt_memory_order order) { (void)order; return xt_atomic_load_i8(ptr); }
+static inline int16_t  xt_atomic_load_i16_ordered(const xt_atomic_int16_t*  ptr, enum xt_memory_order order) { (void)order; return xt_atomic_load_i16(ptr); }
+static inline int32_t  xt_atomic_load_i32_ordered(const xt_atomic_int32_t*  ptr, enum xt_memory_order order) { (void)order; return xt_atomic_load_i32(ptr); }
+static inline int64_t  xt_atomic_load_i64_ordered(const xt_atomic_int64_t*  ptr, enum xt_memory_order order) { (void)order; return xt_atomic_load_i64(ptr); }
+
+static inline void xt_atomic_store_u8_ordered (xt_atomic_uint8_t*  ptr, uint8_t  v, enum xt_memory_order order) { (void)order; xt_atomic_store_u8(ptr, v); }
+static inline void xt_atomic_store_u16_ordered(xt_atomic_uint16_t* ptr, uint16_t v, enum xt_memory_order order) { (void)order; xt_atomic_store_u16(ptr, v); }
+static inline void xt_atomic_store_u32_ordered(xt_atomic_uint32_t* ptr, uint32_t v, enum xt_memory_order order) { (void)order; xt_atomic_store_u32(ptr, v); }
+static inline void xt_atomic_store_u64_ordered(xt_atomic_uint64_t* ptr, uint64_t v, enum xt_memory_order order) { (void)order; xt_atomic_store_u64(ptr, v); }
+static inline void xt_atomic_store_i8_ordered (xt_atomic_int8_t*   ptr, int8_t   v, enum xt_memory_order order) { (void)order; xt_atomic_store_i8(ptr, v); }
+static inline void xt_atomic_store_i16_ordered(xt_atomic_int16_t*  ptr, int16_t  v, enum xt_memory_order order) { (void)order; xt_atomic_store_i16(ptr, v); }
+static inline void xt_atomic_store_i32_ordered(xt_atomic_int32_t*  ptr, int32_t  v, enum xt_memory_order order) { (void)order; xt_atomic_store_i32(ptr, v); }
+static inline void xt_atomic_store_i64_ordered(xt_atomic_int64_t*  ptr, int64_t  v, enum xt_memory_order order) { (void)order; xt_atomic_store_i64(ptr, v); }
+
+static inline uint8_t  xt_atomic_compare_exchange_u8_ordered (xt_atomic_uint8_t*  ptr, uint8_t  expected, uint8_t  desired, enum xt_memory_order order) { (void)order; return xt_atomic_compare_exchange_u8 (ptr, expected, desired); }
+static inline uint16_t xt_atomic_compare_exchange_u16_ordered(xt_atomic_uint16_t* ptr, uint16_t expected, uint16_t desired, enum xt_memory_order order) { (void)order; return xt_atomic_compare_exchange_u16(ptr, expected, desired); }
+static inline uint32_t xt_atomic_compare_exchange_u32_ordered(xt_atomic_uint32_t* ptr, uint32_t expected, uint32_t desired, enum xt_memory_order order) { (void)order; return xt_atomic_compare_exchange_u32(ptr, expected, desired); }
+static inline uint64_t xt_atomic_compare_exchange_u64_ordered(xt_atomic_uint64_t* ptr, uint64_t expected, uint64_t desired, enum xt_memory_order order) { (void)order; return xt_atomic_compare_exchange_u64(ptr, expected, desired); }
+static inline int8_t   xt_atomic_compare_exchange_i8_ordered (xt_atomic_int8_t*   ptr, int8_t   expected, int8_t   desired, enum xt_memory_order order) { (void)order; return xt_atomic_compare_exchange_i8 (ptr, expected, desired); }
+static inline int16_t  xt_atomic_compare_exchange_i16_ordered(xt_atomic_int16_t*  ptr, int16_t  expected, int16_t  desired, enum xt_memory_order order) { (void)order; return xt_atomic_compare_exchange_i16(ptr, expected, desired); }
+static inline int32_t  xt_atomic_compare_exchange_i32_ordered(xt_atomic_int32_t*  ptr, int32_t  expected, int32_t  desired, enum xt_memory_order order) { (void)order; return xt_atomic_compare_exchange_i32(ptr, expected, desired); }
+static inline int64_t  xt_atomic_compare_exchange_i64_ordered(xt_atomic_int64_t*  ptr, int64_t  expected, int64_t  desired, enum xt_memory_order order) { (void)order; return xt_atomic_compare_exchange_i64(ptr, expected, desired); }
+
+#else
+
+static inline uint8_t  xt_atomic_load_u8_ordered (const xt_atomic_uint8_t*  ptr, enum xt_memory_order order) { return __atomic_load_n(ptr, order); }
+static inline uint16_t xt_atomic_load_u16_ordered(const xt_atomic_uint16_t* ptr, enum xt_memory_order order) { return __atomic_load_n(ptr, order); }
+static inline uint32_t xt_atomic_load_u32_ordered(const xt_atomic_uint32_t* ptr, enum xt_memory_order order) { return __atomic_load_n(ptr, order); }
+static inline uint64_t xt_atomic_load_u64_ordered(const xt_atomic_uint64_t* ptr, enum xt_memory_order order) { return __atomic_load_n(ptr, order); }
+static inline int8_t   xt_atomic_load_i8_ordered (const xt_atomic_int8_t*   ptr, enum xt_memory_order order) { return (int8_t) __atomic_load_n((const xt_atomic_uint8_t*)ptr,  order); }
+static inline int16_t  xt_atomic_load_i16_ordered(const xt_atomic_int16_t*  ptr, enum xt_memory_order order) { return (int16_t)__atomic_load_n((const xt_atomic_uint16_t*)ptr, order); }
+static inline int32_t  xt_atomic_load_i32_ordered(const xt_atomic_int32_t*  ptr, enum xt_memory_order order) { return (int32_t)__atomic_load_n((const xt_atomic_uint32_t*)ptr, order); }
+static inline int64_t  xt_atomic_load_i64_ordered(const xt_atomic_int64_t*  ptr, enum xt_memory_order order) { return (int64_t)__atomic_load_n((const xt_atomic_uint64_t*)ptr, order); }
+
+static inline void xt_atomic_store_u8_ordered (xt_atomic_uint8_t*  ptr, uint8_t  v, enum xt_memory_order order) { __atomic_store_n(ptr, v, order); }
+static inline void xt_atomic_store_u16_ordered(xt_atomic_uint16_t* ptr, uint16_t v, enum xt_memory_order order) { __atomic_store_n(ptr, v, order); }
+static inline void xt_atomic_store_u32_ordered(xt_atomic_uint32_t* ptr, uint32_t v, enum xt_memory_order order) { __atomic_store_n(ptr, v, order); }
+static inline void xt_atomic_store_u64_ordered(xt_atomic_uint64_t* ptr, uint64_t v, enum xt_memory_order order) { __atomic_store_n(ptr, v, order); }
+static inline void xt_atomic_store_i8_ordered (xt_atomic_int8_t*   ptr, int8_t   v, enum xt_memory_order order) { __atomic_store_n((xt_atomic_uint8_t*)ptr,  (uint8_t)v,  order); }
+static inline void xt_atomic_store_i16_ordered(xt_atomic_int16_t*  ptr, int16_t  v, enum xt_memory_order order) { __atomic_store_n((xt_atomic_uint16_t*)ptr, (uint16_t)v, order); }
+static inline void xt_atomic_store_i32_ordered(xt_atomic_int32_t*  ptr, int32_t  v, enum xt_memory_order order) { __atomic_store_n((xt_atomic_uint32_t*)ptr, (uint32_t)v, order); }
+static inline void xt_atomic_store_i64_ordered(xt_atomic_int64_t*  ptr, int64_t  v, enum xt_memory_order order) { __atomic_store_n((xt_atomic_uint64_t*)ptr, (uint64_t)v, order); }
+
+static inline uint8_t xt_atomic_compare_exchange_u8_ordered(xt_atomic_uint8_t* ptr, uint8_t expected, uint8_t desired, enum xt_memory_order order)
+{
+    xthread_assert(order != xt_memory_order_release && order != xt_memory_order_acq_rel);
+    __atomic_compare_exchange_n(ptr, &expected, desired, 0, order, order);
+    return expected;
+}
+static inline uint16_t xt_atomic_compare_exchange_u16_ordered(xt_atomic_uint16_t* ptr, uint16_t expected, uint16_t desired, enum xt_memory_order order)
+{
+    xthread_assert(order != xt_memory_order_release && order != xt_memory_order_acq_rel);
+    __atomic_compare_exchange_n(ptr, &expected, desired, 0, order, order);
+    return expected;
+}
+static inline uint32_t xt_atomic_compare_exchange_u32_ordered(xt_atomic_uint32_t* ptr, uint32_t expected, uint32_t desired, enum xt_memory_order order)
+{
+    xthread_assert(order != xt_memory_order_release && order != xt_memory_order_acq_rel);
+    __atomic_compare_exchange_n(ptr, &expected, desired, 0, order, order);
+    return expected;
+}
+static inline uint64_t xt_atomic_compare_exchange_u64_ordered(xt_atomic_uint64_t* ptr, uint64_t expected, uint64_t desired, enum xt_memory_order order)
+{
+    xthread_assert(order != xt_memory_order_release && order != xt_memory_order_acq_rel);
+    __atomic_compare_exchange_n(ptr, &expected, desired, 0, order, order);
+    return expected;
+}
+static inline int8_t xt_atomic_compare_exchange_i8_ordered(xt_atomic_int8_t* ptr, int8_t expected, int8_t desired, enum xt_memory_order order)
+{
+    xthread_assert(order != xt_memory_order_release && order != xt_memory_order_acq_rel);
+    uint8_t exp = (uint8_t)expected;
+    __atomic_compare_exchange_n((xt_atomic_uint8_t*)ptr, &exp, (uint8_t)desired, 0, order, order);
+    return (int8_t)exp;
+}
+static inline int16_t xt_atomic_compare_exchange_i16_ordered(xt_atomic_int16_t* ptr, int16_t expected, int16_t desired, enum xt_memory_order order)
+{
+    xthread_assert(order != xt_memory_order_release && order != xt_memory_order_acq_rel);
+    uint16_t exp = (uint16_t)expected;
+    __atomic_compare_exchange_n((xt_atomic_uint16_t*)ptr, &exp, (uint16_t)desired, 0, order, order);
+    return (int16_t)exp;
+}
+static inline int32_t xt_atomic_compare_exchange_i32_ordered(xt_atomic_int32_t* ptr, int32_t expected, int32_t desired, enum xt_memory_order order)
+{
+    xthread_assert(order != xt_memory_order_release && order != xt_memory_order_acq_rel);
+    uint32_t exp = (uint32_t)expected;
+    __atomic_compare_exchange_n((xt_atomic_uint32_t*)ptr, &exp, (uint32_t)desired, 0, order, order);
+    return (int32_t)exp;
+}
+static inline int64_t xt_atomic_compare_exchange_i64_ordered(xt_atomic_int64_t* ptr, int64_t expected, int64_t desired, enum xt_memory_order order)
+{
+    xthread_assert(order != xt_memory_order_release && order != xt_memory_order_acq_rel);
+    uint64_t exp = (uint64_t)expected;
+    __atomic_compare_exchange_n((xt_atomic_uint64_t*)ptr, &exp, (uint64_t)desired, 0, order, order);
+    return (int64_t)exp;
+}
+
+#endif
 
 static inline void* xt_atomic_load_ptr(const xt_atomic_ptr_t* ptr) { return (void*)xt_atomic_load_u64((uint64_t*)ptr); }
 static inline void  xt_atomic_store_ptr(xt_atomic_ptr_t* ptr, void* v) { xt_atomic_store_u64((uint64_t*)ptr, (uint64_t)v); }
