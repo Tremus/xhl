@@ -251,10 +251,12 @@ bool xfiles_delete(const char* path);
 // Opens OS file or folder as if it was opened with
 // Win: File Explorer /
 // OSX: Finder
+// NOTE: this is a blocking call
 bool xfiles_open_file_explorer(const char* path);
 // Opens OS file browsing app with path selected
 // Win: File Explorer /
 // OSX: Finder
+// NOTE: this is a blocking call
 bool xfiles_select_in_file_explorer(const char* path);
 
 typedef enum XFilesUserDirectory
