@@ -92,5 +92,12 @@ typedef union
     float data[4];
 } xvec4f;
 
+typedef union
+{
+    struct { uint64_t left, right; };
+    struct { uint64_t l, r; };
+    uint64_t data[2];
+} xvec2u64;
+
 // clang-format on
 #endif // XHL_VECTOR_H
