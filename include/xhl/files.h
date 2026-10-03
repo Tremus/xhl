@@ -1068,9 +1068,10 @@ xfiles_watch_context_t xfiles_watch_create(const char* path, void* udata, xfiles
 
     memset(ctx, 0, sizeof(*ctx));
 
-    ctx->pathlen  = strlen(path);
-    ctx->udata    = udata;
-    ctx->callback = cb;
+    ctx->hDirectory = INVALID_HANDLE_VALUE;
+    ctx->pathlen    = strlen(path);
+    ctx->udata      = udata;
+    ctx->callback   = cb;
 
     // Remove backslash
     if (ctx->pathlen > 0 && (path[ctx->pathlen - 1] == '\\' || path[ctx->pathlen - 1] == '/'))
@@ -1183,10 +1184,20 @@ void xfiles_watch_flush(xfiles_watch_context_t _ctx)
 void xfiles_watch_destroy(xfiles_watch_context_t _ctx)
 {
     XFWatchContext* ctx = (XFWatchContext*)_ctx;
+    if (ctx->hDirectory != INVALID_HANDLE_VALUE)
+    {
+        // The kernel may still write into ctx->buffer & ctx->overlapped while a read is pending. Cancel it and wait
+        // for the cancellation to complete before freeing them
+        if (ctx->overlapped.hEvent && CancelIoEx(ctx->hDirectory, &ctx->overlapped))
+        {
+            DWORD dwNumberOfBytesTransferred = 0;
+            GetOverlappedResult(ctx->hDirectory, &ctx->overlapped, &dwNumberOfBytesTransferred, TRUE);
+        }
+        CloseHandle(ctx->hDirectory);
+    }
     if (ctx->overlapped.hEvent)
         CloseHandle(ctx->overlapped.hEvent);
-    if (ctx->hDirectory)
-        CloseHandle(ctx->hDirectory);
+    XFILES_FREE(ctx);
 }
 
 #endif // _WIN32
@@ -1717,6 +1728,7 @@ xfiles_watch_context_t xfiles_watch_create(const char* path, void* udata, xfiles
     XFILES_ASSERT(cb != NULL);   // Did you forget to write a callback?
 
     struct XFWatchContext* ctx = XFILES_MALLOC(sizeof(*ctx));
+    memset(ctx, 0, sizeof(*ctx));
 
     ctx->udata    = udata;
     ctx->callback = cb;
@@ -1754,7 +1766,7 @@ void xfiles_watch_flush(xfiles_watch_context_t _ctx)
 
         for (int i = 0; i < nevents; i++)
         {
-            if (events[0].flags == EV_ERROR)
+            if (events[i].flags == EV_ERROR)
                 continue;
 
             // Helpful table pulled from here:
