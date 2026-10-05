@@ -16,9 +16,9 @@
 #define XFILES_REALLOC(size)    xrealloc(size)
 #define XFILES_FREE(ptr)        xfree(ptr)
 
-#include "./include/xhl/array.h"
-#include "./include/xhl/files.h"
-#include "./include/xhl/string.h"
+#include "../include/xhl/array.h"
+#include "../include/xhl/files.h"
+#include "../include/xhl/string.h"
 
 #include <stdio.h>
 
