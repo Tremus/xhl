@@ -95,7 +95,7 @@ int main()
     g_running = 1;
     signal(SIGINT, ctrl_c_callback);
     // setup event queue
-    XFilesWatchContext ctx = xfiles_watch_create("/path/to/directory", NULL, cb_onfilechange);
+    XFilesWatchContext* ctx = xfiles_watch_create("/path/to/directory", NULL, cb_onfilechange);
     while (g_running)
     {
         xfiles_watch_flush(ctx); // poll for items in queue, trigger cb_onfilechange()
@@ -383,13 +383,13 @@ typedef struct XFilesWatchEvent
 } XFilesWatchEvent;
 // 'event' and its strings are only valid for the duration of the callback
 typedef void (*XFilesWatchCallback)(const XFilesWatchEvent* event, void* udata);
-typedef void* XFilesWatchContext;
+typedef struct XFilesWatchContext XFilesWatchContext;
 
 // Sets up an event queue for file change notifications
-XFilesWatchContext xfiles_watch_create(const char* path, void* udata, XFilesWatchCallback cb);
+XFilesWatchContext* xfiles_watch_create(const char* path, void* udata, XFilesWatchCallback cb);
 // Process all events in the queue
-void xfiles_watch_flush(XFilesWatchContext ctx);
-void xfiles_watch_destroy(XFilesWatchContext ctx);
+void xfiles_watch_flush(XFilesWatchContext* ctx);
+void xfiles_watch_destroy(XFilesWatchContext* ctx);
 
 #ifdef __cplusplus
 }
@@ -1075,7 +1075,7 @@ void _xfiles_watch_init_overlapped(XFilesWatchContext* ctx)
     XFILES_ASSERT(ok);
 }
 
-XFilesWatchContext xfiles_watch_create(const char* path, void* udata, XFilesWatchCallback cb)
+XFilesWatchContext* xfiles_watch_create(const char* path, void* udata, XFilesWatchCallback cb)
 {
     XFilesWatchContext* ctx = (XFilesWatchContext*)XFILES_MALLOC(sizeof(*ctx));
 
@@ -1126,7 +1126,7 @@ XFilesWatchContext xfiles_watch_create(const char* path, void* udata, XFilesWatc
     return ctx;
 }
 
-void xfiles_watch_flush(XFilesWatchContext _ctx)
+void xfiles_watch_flush(XFilesWatchContext* _ctx)
 {
     XFilesWatchContext* ctx = (XFilesWatchContext*)_ctx;
 
@@ -1206,7 +1206,7 @@ void xfiles_watch_flush(XFilesWatchContext _ctx)
     }
 }
 
-void xfiles_watch_destroy(XFilesWatchContext _ctx)
+void xfiles_watch_destroy(XFilesWatchContext* _ctx)
 {
     XFilesWatchContext* ctx = (XFilesWatchContext*)_ctx;
     if (ctx->hDirectory != INVALID_HANDLE_VALUE)
@@ -1752,7 +1752,7 @@ static void _xfiles_watch_send(struct XFilesWatchContext* ctx, enum XFilesWatchT
 
 static void _xfiles_watch_noop(void* p) { (void)p; }
 
-XFilesWatchContext xfiles_watch_create(const char* path, void* udata, XFilesWatchCallback cb)
+XFilesWatchContext* xfiles_watch_create(const char* path, void* udata, XFilesWatchCallback cb)
 {
     XFILES_ASSERT(path != NULL); // What path should be watched?
     XFILES_ASSERT(cb != NULL);   // Did you forget to write a callback?
@@ -1828,7 +1828,7 @@ XFilesWatchContext xfiles_watch_create(const char* path, void* udata, XFilesWatc
     return ctx;
 }
 
-void xfiles_watch_flush(XFilesWatchContext _ctx)
+void xfiles_watch_flush(XFilesWatchContext* _ctx)
 {
     XFILES_ASSERT(_ctx != NULL);
     struct XFilesWatchContext* ctx = (struct XFilesWatchContext*)_ctx;
@@ -1914,7 +1914,7 @@ void xfiles_watch_flush(XFilesWatchContext _ctx)
     }
 }
 
-void xfiles_watch_destroy(XFilesWatchContext _ctx)
+void xfiles_watch_destroy(XFilesWatchContext* _ctx)
 {
     XFILES_ASSERT(_ctx != NULL);
     struct XFilesWatchContext* ctx = (struct XFilesWatchContext*)_ctx;
