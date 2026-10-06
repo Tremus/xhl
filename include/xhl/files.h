@@ -241,10 +241,16 @@ bool xfiles_write(const char* path, const void* in, size_t inlen);
 // Creates file if it doesn't exist with default access permissions.
 // Writes data starting from the end of a file, leaving old contents intact
 bool xfiles_append(const char* path, const char* in, size_t inlen);
+typedef enum XFilesMoveFlags
+{
+    XFILES_MOVE_DEFAULT = 0, // Fails if 'to' already exists
+    // Replaces 'to' if it's a file. Atomic when 'from' and 'to' are on the same volume
+    // macOS will also replace 'to' if both are folders and 'to' is empty. Windows never replaces folders
+    XFILES_MOVE_OVERWRITE = 1 << 0,
+} XFilesMoveFlags;
 // Renames / moves file or folder
 // You are advised to check for path collisions using xfiles_exists() beforehand
-// Fails if the destination location already exists
-bool xfiles_move(const char* from, const char* to);
+bool xfiles_move(const char* from, const char* to, XFilesMoveFlags flags);
 
 // Moves the file to:
 // Win: Recycle Bin /
@@ -685,7 +691,7 @@ bool xfiles_append(const char* path, const char* in, size_t inlen)
     return ok;
 }
 
-bool xfiles_move(const char* from, const char* to)
+bool xfiles_move(const char* from, const char* to, XFilesMoveFlags flags)
 {
     // https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-movefilew
     // https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-movefileexw
@@ -698,7 +704,11 @@ bool xfiles_move(const char* from, const char* to)
         // In the case that the destination is on a different volume to the source, the file will be copied to the new
         // volume, and deleted afterwards. This is much safer, "cut & pasting" big files to/from an external drive on
         // Windows is an infamous way to lose important data
-        return MoveFileExW(FromPath, ToPath, MOVEFILE_COPY_ALLOWED);
+        DWORD dwFlags = MOVEFILE_COPY_ALLOWED;
+        // Never replaces a folder, even with this flag
+        if (flags & XFILES_MOVE_OVERWRITE)
+            dwFlags |= MOVEFILE_REPLACE_EXISTING;
+        return MoveFileExW(FromPath, ToPath, dwFlags);
     }
     return false;
 }
@@ -1433,7 +1443,11 @@ bool xfiles_append(const char* path, const char* in, size_t inlen)
 }
 
 // https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/rename.2.html
-bool xfiles_move(const char* from, const char* to) { return 0 == rename_np(from, to, RENAME_EXCL); }
+bool xfiles_move(const char* from, const char* to, XFilesMoveFlags flags)
+{
+    unsigned int rename_flags = (flags & XFILES_MOVE_OVERWRITE) ? 0 : RENAME_EXCL;
+    return 0 == rename_np(from, to, rename_flags);
+}
 
 // https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/unlink.2.html
 bool xfiles_delete(const char* path) { return unlink(path) == 0; }
