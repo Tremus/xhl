@@ -243,6 +243,7 @@ bool xfiles_write(const char* path, const void* in, size_t inlen);
 bool xfiles_append(const char* path, const char* in, size_t inlen);
 // Renames / moves file or folder
 // You are advised to check for path collisions using xfiles_exists() beforehand
+// Fails if the destination location already exists
 bool xfiles_move(const char* from, const char* to);
 
 // Moves the file to:
@@ -687,12 +688,18 @@ bool xfiles_append(const char* path, const char* in, size_t inlen)
 bool xfiles_move(const char* from, const char* to)
 {
     // https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-movefilew
+    // https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-movefileexw
     WCHAR FromPath[MAX_PATH];
     WCHAR ToPath[MAX_PATH];
     int   num1 = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, from, -1, FromPath, XFILES_ARRLEN(FromPath));
     int   num2 = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, to, -1, ToPath, XFILES_ARRLEN(ToPath));
     if (num1 && num2)
-        return MoveFileW(FromPath, ToPath);
+    {
+        // In the case that the destination is on a different volume to the source, the file will be copied to the new
+        // volume, and deleted afterwards. This is much safer, "cut & pasting" big files to/from an external drive on
+        // Windows is an infamous way to lose important data
+        return MoveFileExW(FromPath, ToPath, MOVEFILE_COPY_ALLOWED);
+    }
     return false;
 }
 
@@ -1426,7 +1433,7 @@ bool xfiles_append(const char* path, const char* in, size_t inlen)
 }
 
 // https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/rename.2.html
-bool xfiles_move(const char* from, const char* to) { return 0 == rename(from, to); }
+bool xfiles_move(const char* from, const char* to) { return 0 == rename_np(from, to, RENAME_EXCL); }
 
 // https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/unlink.2.html
 bool xfiles_delete(const char* path) { return unlink(path) == 0; }
