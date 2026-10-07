@@ -553,14 +553,6 @@ int main(int argc, char** argv)
             fprintf(stderr, "xfiles_create_directory(%s) failed\n", g_root);
             return 1;
         }
-#ifndef _WIN32
-        // FSEvents reports canonical paths, eg. /tmp/... arrives as /private/tmp/...
-        char canonical[PATH_MAX];
-        if (!realpath(g_root, canonical))
-            return 1;
-        memcpy(g_root, canonical, sizeof(g_root));
-        snprintf(g_outside, sizeof(g_outside), "%s_outside", g_root);
-#endif
     }
 
     // Created before the watch starts, to check modifying it isn't reported as CREATED

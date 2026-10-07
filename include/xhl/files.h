@@ -1649,7 +1649,7 @@ struct XFilesWatchContext
     bool            started;
     struct timespec start_time;
 
-    // realpath() of the watched root. FSEvents reports canonical paths, eg. /var/... arrives as /private/var/...
+    // The watched root
     int  pathlen;
     char path[PATH_MAX];
 
@@ -1783,12 +1783,12 @@ XFilesWatchContext* xfiles_watch_create(const char* path, void* udata, XFilesWat
     ctx->udata    = udata;
     ctx->callback = cb;
 
-    if (realpath(path, ctx->path) == NULL)
+    ctx->pathlen = snprintf(ctx->path, sizeof(ctx->path), "%s", path);
+    if (ctx->pathlen < 0 || ctx->pathlen > sizeof(ctx->path))
     {
-        XFILES_FREE(ctx);
+        xfiles_watch_destroy(ctx);
         return NULL;
     }
-    ctx->pathlen = (int)strlen(ctx->path);
 
     // Create stream
     {
