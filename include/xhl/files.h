@@ -1446,7 +1446,7 @@ bool xfiles_append(const char* path, const char* in, size_t inlen)
 bool xfiles_move(const char* from, const char* to, XFilesMoveFlags flags)
 {
     unsigned int rename_flags = (flags & XFILES_MOVE_OVERWRITE) ? 0 : RENAME_EXCL;
-    return 0 == rename_np(from, to, rename_flags);
+    return 0 == renamex_np(from, to, rename_flags);
 }
 
 // https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/unlink.2.html
@@ -2019,7 +2019,7 @@ int xfiles_get_user_directory(char* out, size_t outlen, XFilesUserDirectory loc)
         "/Pictures",                    // XFILES_USER_DIRECTORY_PICTURES
         "/Movies",                      // XFILES_USER_DIRECTORY_VIDEOS
     };
-    _Static_assert(XFILES_ARRLEN(PATHS) == XFILES_USER_DIRECTORY_COUNT);
+    _Static_assert(XFILES_ARRLEN(PATHS) == XFILES_USER_DIRECTORY_COUNT, "");
 
     // I don't think calling this function touches the reference count, but then I haven't looked at the binary
     // https://developer.apple.com/documentation/foundation/1413045-nshomedirectory

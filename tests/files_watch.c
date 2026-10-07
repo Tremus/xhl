@@ -1,6 +1,6 @@
 // Tests xfiles_watch_* in xhl/files.h. FSEvents on macOS, ReadDirectoryChangesW on Windows
 //
-// Build (macOS):   clang -x objective-c files_watch.c -framework CoreServices -framework Foundation -o files_watch
+// Build (macOS):   clang -x objective-c files_watch.c -framework AppKit -o files_watch
 // Build (Windows): clang files_watch.c -o files_watch.exe
 // Run it from a folder you don't mind it creating ./temp and ./temp_outside in. Both are moved to the Trash/Recycle Bin
 // when it finishes
