@@ -353,6 +353,9 @@ typedef struct xfiles_list_item_t
     unsigned name_idx;
     unsigned ext_idx;
     bool     is_dir;
+
+    // Unix epoch time in nanoseconds. Free on Windows. On macOS it costs a stat per file, and is 0 for directories
+    uint64_t last_modified_ns;
 } xfiles_list_item_t;
 
 typedef void(xfiles_list_callback_t)(void* data, const xfiles_list_item_t* item);
@@ -1046,6 +1049,16 @@ void xfiles_list(const char* path, void* data, xfiles_list_callback_t* callback)
 
         XFILES_ASSERT(strlen(Item.path) == Item.path_len);
         Item.is_dir = FindData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY;
+
+        // Convert FILETIME (100-ns intervals since 1601-01-01 UTC) to ns since 1970-01-01 UTC
+        {
+            const uint64_t EPOCH_DIFF_100NS = 116444736000000000ULL;
+
+            ULARGE_INTEGER m;
+            m.LowPart             = FindData.ftLastWriteTime.dwLowDateTime;
+            m.HighPart            = FindData.ftLastWriteTime.dwHighDateTime;
+            Item.last_modified_ns = m.QuadPart > EPOCH_DIFF_100NS ? (m.QuadPart - EPOCH_DIFF_100NS) * 100ULL : 0;
+        }
         callback(data, &Item);
 
     iterate:
@@ -1565,6 +1578,15 @@ void xfiles_list(const char* path, void* data, xfiles_list_callback_t* callback)
         if (item.ext_idx == item.name_idx) // Failed to find extension
             item.ext_idx = item.path_len;
         item.is_dir = DT_DIR & entry->d_type;
+
+        item.last_modified_ns = 0;
+        if (!item.is_dir)
+        {
+            struct stat st;
+            if (fstatat(dirfd(dir), entry->d_name, &st, AT_SYMLINK_NOFOLLOW) == 0)
+                item.last_modified_ns =
+                    (uint64_t)st.st_mtimespec.tv_sec * 1000000000ULL + (uint64_t)st.st_mtimespec.tv_nsec;
+        }
 
         XFILES_ASSERT(strlen(item.path) == item.path_len);
         callback(data, &item);
