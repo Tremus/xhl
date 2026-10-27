@@ -33,7 +33,7 @@ typedef struct
 {
     xtime_timer_cb callback;
     void*          user_data;
-    void*          _platform; // CFRunLoopTimerRef on macOS; HWND on Windows
+    void*          _platform; // CFRunLoopTimerRef on macOS; HWND on Windows; interval id on Emscripten
 } XTimer;
 
 // Warning: only call these from the main thread
@@ -254,7 +254,48 @@ void xtime_timer_stop(XTimer* t)
     memset(t, 0, sizeof(*t));
 }
 
-#endif // __APPLE__
+#elif defined(__EMSCRIPTEN__)
+#include <emscripten/emscripten.h>
+#include <emscripten/eventloop.h>
+#include <emscripten/html5.h>
+#include <unistd.h>
+
+double   xhl_start_now; // performance.now(), ms
+uint64_t xhl_unixtime_init;
+
+void xtime_init()
+{
+    xhl_start_now     = emscripten_get_now();
+    xhl_unixtime_init = (uint64_t)emscripten_date_now();
+}
+
+// Resolution is whatever the host gives performance.now(): sub-us in node, coarsened (5-100 us) in browsers
+uint64_t xtime_now_ns() { return (uint64_t)((emscripten_get_now() - xhl_start_now) * 1e6); }
+
+// Busy-waits on the main thread (there's no blocking sleep there without ASYNCIFY)
+void xtime_sleep_ms(uint32_t ms) { usleep((useconds_t)ms * 1000); }
+
+static void _xtime_timer_proc(void* info)
+{
+    XTimer* t = (XTimer*)info;
+    t->callback(t->user_data);
+}
+
+// Fires from the browser / node event loop, so only once control returns to it
+void xtime_timer_start(XTimer* t, uint32_t interval_ms, xtime_timer_cb cb, void* user_data)
+{
+    t->callback  = cb;
+    t->user_data = user_data;
+    t->_platform = (void*)(intptr_t)emscripten_set_interval(_xtime_timer_proc, (double)interval_ms, t);
+}
+
+void xtime_timer_stop(XTimer* t)
+{
+    emscripten_clear_interval((int)(intptr_t)t->_platform);
+    memset(t, 0, sizeof(*t));
+}
+
+#endif // __EMSCRIPTEN__
 
 double   xtime_convert_ns_to_ms(uint64_t ns) { return (double)ns / 1.e6; }
 double   xtime_convert_ns_to_sec(uint64_t ns) { return (double)ns / 1.e9; }
