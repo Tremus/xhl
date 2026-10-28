@@ -10,6 +10,9 @@ Stands for:
 
 [STB-Style](https://github.com/nothings/stb/blob/master/docs/stb_howto.txt) headers
 
+> [!NOTE]
+> Linux support is in progress...
+
 ### [alloc.h](include/xhl/alloc.h)
 
 Wraps `malloc`, calling `exit(ENOMEM)` if `NULL` is returned. Additionally tracks number of `xmalloc` calls in `DEBUG` to help spot memory leaks.

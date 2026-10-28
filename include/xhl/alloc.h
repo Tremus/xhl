@@ -205,14 +205,11 @@ void xvalloc_info(size_t* _valloc_granularity, size_t* _page_size)
         *_valloc_granularity = PageSize;
 }
 
-#else // !_WIN32
+// end _WIN32
+#elif defined(__APPLE__) || defined(__linux__)
 
-#ifdef __APPLE__
 #include <sys/mman.h>
 #include <unistd.h>
-#else
-#error Unknown unix
-#endif
 
 void* xvalloc(void* hint, size_t size)
 {
@@ -248,6 +245,9 @@ void xvalloc_info(size_t* _valloc_granularity, size_t* _page_size)
         *_page_size = page_size;
 }
 
+// end __APPLE__ || __linux__
+#else
+#error "Unknown platform"
 #endif
 
 #endif // XHL_ALLOC_IMPL
