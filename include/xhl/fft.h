@@ -1040,6 +1040,45 @@ NI void lane_stage_inv_neon(const float* src, float* dst, int L, int radix, int 
         s > 1 ? lane_pass_inv_neon(src, dst, L, 8, s, tw, 0) : lane_pass_inv_neon(src, dst, L, 8, 1, 0, xt);
 }
 
+// Lane blocks up to this many positions (32 B each, 64 KB) run their stages breadth-first: all of N <= 16384. Above
+// it the last lane stage no longer runs fused with the cross-lane pass, and the inverse cross-lane pass is tiled.
+#define LANE_BLOCK_NEON 2048
+
+// Forward lane stages t..S-1 on the block of 'size' positions at position 'base' (stage 0 reads 'in'). DIF: after
+// stage t the block is radix[t] independent sub-FFTs of span[t] positions. A block bigger than LANE_BLOCK_NEON
+// finishes each sub-FFT depth-first while it's in cache, instead of one sweep of memory per stage (xfft_avx2 it21).
+NI void lane_fwd_rec_neon(const Plan_neon* plan, const float* in, float* work, const int* radix, const int* span,
+                          const int* twoff, int S, int t, ptrdiff_t base, int size)
+{
+    for (; t < S; t++)
+    {
+        const float* src = t ? work : in;
+        lane_stage_fwd_neon(src + 8 * base, work + 8 * base, size, radix[t], span[t], plan->stw + twoff[t],
+                            plan->xtw + 8 * base);
+        if (size > LANE_BLOCK_NEON && t + 1 < S)
+        {
+            for (int b = 0; b < radix[t]; b++)
+                lane_fwd_rec_neon(plan, in, work, radix, span, twoff, S, t + 1, base + b * span[t], span[t]);
+            return;
+        }
+    }
+}
+
+// Adjoint of lane_fwd_rec_neon (DIT): stages S-1..t, the sub-FFTs first. Stage 0 writes 'out'.
+NI void lane_inv_rec_neon(const Plan_neon* plan, float* work, float* out, const int* radix, const int* span,
+                          const int* twoff, int S, int t, ptrdiff_t base, int size)
+{
+    if (size > LANE_BLOCK_NEON && t + 1 < S)
+        for (int b = 0; b < radix[t]; b++)
+            lane_inv_rec_neon(plan, work, out, radix, span, twoff, S, t + 1, base + b * span[t], span[t]);
+    for (int u = size > LANE_BLOCK_NEON ? t : S - 1; u >= t; u--)
+    {
+        float* dst = u ? work : out;
+        lane_stage_inv_neon(work + 8 * base, dst + 8 * base, size, radix[u], span[u], plan->stw + twoff[u],
+                            xtw_inv(plan) + 8 * base);
+    }
+}
+
 // Cross-lane radix 4 for bins k (y0) and k+1 (y1): radix 2 over (r, r+2) inside the vectors, then over (r, r+1)
 // between the vector halves. Z_q = sum_r Y_r (-i)^(rq) goes to Z[k + qL], Z[k+1 + qL] (one vector)
 FI void cross_fwd(cv_neon y0, cv_neon y1, float* z, ptrdiff_t k, ptrdiff_t L)
@@ -1080,15 +1119,34 @@ XFFT_DEF void xfft_forward_neon(void* p, const float* in, float* out)
         // 1. Lane FFTs: input (already in lane layout) -> work, digit-reversed. The last stage (span 1) applies the
         // cross-lane twiddles
         int radix[MAX_STAGES], span[MAX_STAGES], S = lane_stages_neon(L, radix, span);
-        // With a radix-4 last stage (and more than one stage), it runs fused with the cross-lane pass below
-        int          fused = S > 1 && radix[S - 1] == 4;
-        const float* tw    = plan->stw;
-        lane_stage_fwd_neon(in, work, L, radix[0], span[0], tw, plan->xtw);
-        tw += stage_tw_neon(radix[0], span[0]);
-        for (int t = 1; t < S - fused; t++)
+        // With a radix-4 last stage (and more than one stage), it runs fused with the cross-lane pass below, except
+        // for large L: the fused loop writes 16 Z streams 2L bytes apart, which all land in one L1 set and miss on
+        // every store (65536 fwd: 130 us, 77 of them in that loop; the plain cross-lane pass writes only 4 streams)
+        int fused = S > 1 && radix[S - 1] == 4 && L <= LANE_BLOCK_NEON;
+        if (L > LANE_BLOCK_NEON)
         {
-            lane_stage_fwd_neon(work, work, L, radix[t], span[t], tw, plan->xtw);
-            tw += stage_tw_neon(radix[t], span[t]);
+            int twoff[MAX_STAGES];
+            for (int t = 0, off = 0; t < S; t++)
+            {
+                twoff[t]  = off;
+                off      += stage_tw_neon(radix[t], span[t]);
+            }
+            // Stage 0 out of place (in -> work) reads 8 lines and writes 8 more, 4L bytes apart: all in one L1 set,
+            // 16 lines for 8 ways, 2.1 ns per position against 1.0 in place. Copying first is ~0.3
+            if (in != work)
+                __builtin_memcpy(work, in, n * sizeof(float));
+            lane_fwd_rec_neon(plan, work, work, radix, span, twoff, S, 0, 0, L);
+        }
+        else
+        {
+            const float* tw = plan->stw;
+            lane_stage_fwd_neon(in, work, L, radix[0], span[0], tw, plan->xtw);
+            tw += stage_tw_neon(radix[0], span[0]);
+            for (int t = 1; t < S - fused; t++)
+            {
+                lane_stage_fwd_neon(work, work, L, radix[t], span[t], tw, plan->xtw);
+                tw += stage_tw_neon(radix[t], span[t]);
+            }
         }
         // rev in a local: the stores through float pointers would otherwise reload plan->rev every iteration.
         // rev[k + 1] = rev[k] + rev[1] for even k
@@ -1156,9 +1214,11 @@ XFFT_DEF void xfft_inverse_neon(void* p, const float* in, float* out)
     // Lane FFT workspace: out, as in xfft_forward_neon. The last lane stage then runs in place, which is safe since
     // each butterfly writes exactly the vectors it read. At 8192 the working set is larger than L1, so zbuf is mostly
     // evicted between calls and the merge's descending stores into it were slow (+40% for the merge): there Z goes
-    // in out, which is still cached, and the lane FFTs run in zbuf. Smaller sizes are 2-3% faster without the swap.
-    float* work = n >= 8192 ? plan->zbuf : out;
-    float* z    = n >= 8192 ? out : plan->zbuf;
+    // in out, which is still cached, and the lane FFTs run in zbuf. Smaller sizes are 2-3% faster without the swap,
+    // and so are large L (nothing stays cached there, and the lanes run in place in out with no copy at the end)
+    int    swap = n >= 8192 && L <= LANE_BLOCK_NEON;
+    float* work = swap ? plan->zbuf : out;
+    float* z    = swap ? out : plan->zbuf;
 
     {
         // 3. Merge, 2 bins k = k0+1, k0+2 and their mirrors per iteration, with c = conj X[M-k]:
@@ -1180,7 +1240,7 @@ XFFT_DEF void xfft_inverse_neon(void* p, const float* in, float* out)
     }
     {
         int radix[MAX_STAGES], span[MAX_STAGES], twoff[MAX_STAGES], S = lane_stages_neon(L, radix, span);
-        int fused = S > 1 && radix[S - 1] == 4; // As in xfft_forward_neon
+        int fused = S > 1 && radix[S - 1] == 4 && L <= LANE_BLOCK_NEON; // As in xfft_forward_neon
         for (int t = 0, off = 0; t < S; t++)
         {
             twoff[t]  = off;
@@ -1212,6 +1272,36 @@ XFFT_DEF void xfft_inverse_neon(void* p, const float* in, float* out)
                 }
             }
         }
+        else if (L > LANE_BLOCK_NEON)
+        {
+            // 2. Inverse cross-lane for large L, in tiles of bins k0 + i (i < 16) + j*L/R (j < R, the last lane
+            // radix). Bins k + j*L/R go to rev[k] + 8j, so writing all j for one k writes whole cache lines, where the
+            // plain loop scatters half lines (262144 inv: cross 268 us of 554). The tile's 4R rows of Z (16 bins =
+            // 128 B, one M1 line, each) are first copied into buf, row 4j + q, so the reads stay whole lines too
+            int       R  = radix[S - 1];
+            ptrdiff_t LR = L / R;
+            float     buf[8 * 4 * 32];
+            for (ptrdiff_t k0 = 0; k0 < LR; k0 += 16)
+            {
+                for (int r = 0; r < 4 * R; r++)
+                {
+                    const float* s = z + 2 * (k0 + (r >> 2) * LR + (r & 3) * (ptrdiff_t)L);
+                    for (int c = 0; c < 32; c += 4)
+                        vst1q_f32(buf + 32 * r + c, vld1q_f32(s + c));
+                }
+                for (int i = 0; i < 16; i += 2)
+                {
+                    float* b = work + rev[k0 + i];
+                    for (int j = 0; j < R; j++)
+                    {
+                        cv_neon y0, y1;
+                        cross_inv(buf, i + 64 * j, 16, &y0, &y1);
+                        cv_st_neon(b + 8 * j, y0);
+                        cv_st_neon(b + off1 + 8 * j, y1);
+                    }
+                }
+            }
+        }
         else
         {
             // 2. Inverse cross-lane: Z -> work, digit-reversed (the conj twiddles come in the first inverse lane stage)
@@ -1225,9 +1315,14 @@ XFFT_DEF void xfft_inverse_neon(void* p, const float* in, float* out)
         }
         // 1. Inverse lane FFTs (DIT): work -> output, natural order (the output layout is the lane layout). The first
         // of these (span 1) also applies the conj cross-lane twiddles, unless it ran fused above
-        for (int t = S - 1 - fused; t > 0; t--)
-            lane_stage_inv_neon(work, work, L, radix[t], span[t], plan->stw + twoff[t], xtw_inv(plan));
-        lane_stage_inv_neon(work, out, L, radix[0], span[0], plan->stw, xtw_inv(plan));
+        if (L > LANE_BLOCK_NEON) // work is out here: every stage in place (see the forward's copy)
+            lane_inv_rec_neon(plan, work, work, radix, span, twoff, S, 0, 0, L);
+        else
+        {
+            for (int t = S - 1 - fused; t > 0; t--)
+                lane_stage_inv_neon(work, work, L, radix[t], span[t], plan->stw + twoff[t], xtw_inv(plan));
+            lane_stage_inv_neon(work, out, L, radix[0], span[0], plan->stw, xtw_inv(plan));
+        }
     }
 }
 
