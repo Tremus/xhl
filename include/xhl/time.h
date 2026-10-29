@@ -108,6 +108,7 @@ void xtime_init()
     QueryPerformanceCounter(&xhl_timestart);
 }
 
+// ~24ns per call (Intel Core Ultra 9 185H, Windows 11, clang -O2)
 uint64_t xtime_unix_ms()
 {
     // https://stackoverflow.com/questions/1695288/getting-the-current-time-in-milliseconds-from-the-system-clock-in-windows#1695332
@@ -119,6 +120,7 @@ uint64_t xtime_unix_ms()
     return t;
 }
 
+// ~23ns per call (Intel Core Ultra 9 185H, Windows 11, clang -O2). QueryPerformanceCounter reads the TSC, no syscall
 uint64_t xtime_now_ns()
 {
     // Algo func taken from here:
