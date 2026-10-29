@@ -16,10 +16,10 @@
  * a well understood algorithm. It started from a basic naive implementation.
  *
  * Due to my personal programmer taste, I chose to sacrifice ~10ns in performance in some areas, to reduce overall code
- * size and drastically reduce runaway binary size (>50kb per backend) where possible. This does performance numbers
- * look a little less busted certain workloads. Some earlier iterations had ~78% speedup over FFTW for forward
- * transforms, while only a 30% speedup in their inverse. Together they kind of averages out, with the current
- * implementation only being 3-5% slower than my best ever scores averaged out. The best scores in AVX2 typically needed
+ * size and drastically reduce runaway binary size (>50kb per backend) where possible. This makes performance numbers
+ * look a little less busted on certain workloads. Some earlier iterations had ~78% speedup over FFTW for forward
+ * transforms, while only a 30% speedup in their inverse. Together they kind of average out, with the current
+ * implementation being only 3-5% slower than my best ever scores averaged out. The best scores in AVX2 typically needed
  * a lot of inlined, well pipelined code, but also created runaway binary sizes.
  *
  * USAGE:
@@ -41,11 +41,13 @@
  * xfft_forward_avx2()
  * xfft_forward_auto() <- use this API when you're getting started. It selects the best available API at runtime
  *
- * !!!IMPORTANT!!! - All of your buffers used by this library are required to be aligned to XFFT_ALIGN (=64) bytes.
+ * !!!IMPORTANT!!! - All of your memory used by this library are required to be aligned to XFFT_ALIGN (=64) bytes.
  *                   This is a requirement of AVX/AVX2
  *
  * USAGE ADVANCED:
  * Disable backends using  XFFT_DISABLE_SCALAR / _NEON / _AVX / _AVX2
+ *
+ * Use "#define XFFT_DEF static" before including this header to make everything static/extern/whatever floats your boat
  *
  * Backends that are not supported compile to stubs.
  *  eg 1. The NEON backend depends on (__ARM_NEON && __aarch64__). It will be a stub when you compile on x86 Windows
@@ -187,46 +189,53 @@ int main(void)
 #define XFFT_MAX_N 8192
 #define XFFT_ALIGN 64
 
+// Linkage of every public function. Define as static before including to keep the whole library private to one .c file
+#ifndef XFFT_DEF
+#define XFFT_DEF
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 // auto - Use this API to get the best available API at runtime
-size_t xfft_mem_size_auto(int n);             // Returns the required size of "void* mem", to be used by xfft_init_xxx
-                                              // You must allocate this yourself and align to "XFFT_ALIGN" (64)
-                                              // n=32|64|128...8192
-void*       xfft_init_auto(void* mem, int n); // Returns "void* plan"
-void        xfft_forward_auto(void* plan, const float* in, float* out);
-void        xfft_inverse_auto(void* plan, const float* in, float* out);
-const char* xfft_tell_auto(void); // Returns "avx2"|"avx"|"neon"|"scalar"|"none"
+// Returns the required size of "void* mem", to be used by xfft_init_xxx
+// You must allocate this yourself and align to "XFFT_ALIGN" (64)
+// n=32|64|128...8192
+XFFT_DEF size_t      xfft_mem_size_auto(int n);
+XFFT_DEF void*       xfft_init_auto(void* mem, int n); // Returns "void* plan"
+XFFT_DEF void        xfft_forward_auto(void* plan, const float* in, float* out);
+XFFT_DEF void        xfft_inverse_auto(void* plan, const float* in, float* out);
+XFFT_DEF const char* xfft_tell_auto(void); // Returns "avx2"|"avx"|"neon"|"scalar"|"none"
 
 // scalar
-size_t      xfft_mem_size_scalar(int n);
-void*       xfft_init_scalar(void* mem, int n);
-void        xfft_forward_scalar(void* plan, const float* in, float* out);
-void        xfft_inverse_scalar(void* plan, const float* in, float* out);
-const char* xfft_tell_scalar(void); // Returns "scalar"|"scalar-stub". Other backends copy the pattern. eg. "avx-stub"
+XFFT_DEF size_t xfft_mem_size_scalar(int n);
+XFFT_DEF void*  xfft_init_scalar(void* mem, int n);
+XFFT_DEF void   xfft_forward_scalar(void* plan, const float* in, float* out);
+XFFT_DEF void   xfft_inverse_scalar(void* plan, const float* in, float* out);
+XFFT_DEF const char*
+xfft_tell_scalar(void); // Returns "scalar"|"scalar-stub". Other backends copy the pattern. eg. "avx-stub"
 
 // neon
-size_t      xfft_mem_size_neon(int n);
-void*       xfft_init_neon(void* mem, int n);
-void        xfft_forward_neon(void* plan, const float* in, float* out);
-void        xfft_inverse_neon(void* plan, const float* in, float* out);
-const char* xfft_tell_neon(void);
+XFFT_DEF size_t      xfft_mem_size_neon(int n);
+XFFT_DEF void*       xfft_init_neon(void* mem, int n);
+XFFT_DEF void        xfft_forward_neon(void* plan, const float* in, float* out);
+XFFT_DEF void        xfft_inverse_neon(void* plan, const float* in, float* out);
+XFFT_DEF const char* xfft_tell_neon(void);
 
 // avx
-size_t      xfft_mem_size_avx(int n);
-void*       xfft_init_avx(void* mem, int n);
-void        xfft_forward_avx(void* plan, const float* in, float* out);
-void        xfft_inverse_avx(void* plan, const float* in, float* out);
-const char* xfft_tell_avx(void);
+XFFT_DEF size_t      xfft_mem_size_avx(int n);
+XFFT_DEF void*       xfft_init_avx(void* mem, int n);
+XFFT_DEF void        xfft_forward_avx(void* plan, const float* in, float* out);
+XFFT_DEF void        xfft_inverse_avx(void* plan, const float* in, float* out);
+XFFT_DEF const char* xfft_tell_avx(void);
 
 // avx2
-size_t      xfft_mem_size_avx2(int n);
-void*       xfft_init_avx2(void* mem, int n);
-void        xfft_forward_avx2(void* plan, const float* in, float* out);
-void        xfft_inverse_avx2(void* plan, const float* in, float* out);
-const char* xfft_tell_avx2(void);
+XFFT_DEF size_t      xfft_mem_size_avx2(int n);
+XFFT_DEF void*       xfft_init_avx2(void* mem, int n);
+XFFT_DEF void        xfft_forward_avx2(void* plan, const float* in, float* out);
+XFFT_DEF void        xfft_inverse_avx2(void* plan, const float* in, float* out);
+XFFT_DEF const char* xfft_tell_avx2(void);
 
 #ifdef __cplusplus
 }
@@ -436,9 +445,9 @@ static size_t layout_scalar(int n, unsigned char* mem)
     return off;
 }
 
-size_t xfft_mem_size_scalar(int n) { return layout_scalar(n, 0); }
+XFFT_DEF size_t xfft_mem_size_scalar(int n) { return layout_scalar(n, 0); }
 
-void* xfft_init_scalar(void* mem, int n)
+XFFT_DEF void* xfft_init_scalar(void* mem, int n)
 {
     XFFT_ASSERT(XFFT_IS_ALIGNED(mem));
     if (n < XFFT_MIN_N || n > XFFT_MAX_N || (n & (n - 1)))
@@ -613,7 +622,7 @@ static void cfft(const Plan_scalar* plan, const float* src, float* out, int sw)
     }
 }
 
-void xfft_forward_scalar(void* p, const float* in, float* out)
+XFFT_DEF void xfft_forward_scalar(void* p, const float* in, float* out)
 {
     XFFT_ASSERT(XFFT_IS_ALIGNED(p));
     XFFT_ASSERT(XFFT_IS_ALIGNED(in));
@@ -643,7 +652,7 @@ void xfft_forward_scalar(void* p, const float* in, float* out)
     }
 }
 
-void xfft_inverse_scalar(void* p, const float* in, float* out)
+XFFT_DEF void xfft_inverse_scalar(void* p, const float* in, float* out)
 {
     XFFT_ASSERT(XFFT_IS_ALIGNED(p));
     XFFT_ASSERT(XFFT_IS_ALIGNED(in));
@@ -673,15 +682,15 @@ void xfft_inverse_scalar(void* p, const float* in, float* out)
     cfft(plan, z, out, 1);
 }
 
-const char* xfft_tell_scalar(void) { return "scalar"; }
+XFFT_DEF const char* xfft_tell_scalar(void) { return "scalar"; }
 
 #elif !defined(XFFT_NO_STUBS) // Scalar disabled: planning fails
 
-size_t      xfft_mem_size_scalar(int n) { return 64; }
-void*       xfft_init_scalar(void* mem, int n) { return 0; }
-void        xfft_forward_scalar(void* p, const float* in, float* out) {}
-void        xfft_inverse_scalar(void* p, const float* in, float* out) {}
-const char* xfft_tell_scalar(void) { return "scalar-stub"; }
+XFFT_DEF size_t      xfft_mem_size_scalar(int n) { return 64; }
+XFFT_DEF void*       xfft_init_scalar(void* mem, int n) { return 0; }
+XFFT_DEF void        xfft_forward_scalar(void* p, const float* in, float* out) {}
+XFFT_DEF void        xfft_inverse_scalar(void* p, const float* in, float* out) {}
+XFFT_DEF const char* xfft_tell_scalar(void) { return "scalar-stub"; }
 
 #endif // XFFT_SCALAR_ENABLED
 
@@ -783,9 +792,9 @@ static size_t layout_neon(int n, unsigned char* mem)
 // The inverse cross-lane twiddles follow the forward ones
 static float* xtw_inv(const Plan_neon* plan) { return plan->xtw + plan->n; }
 
-size_t xfft_mem_size_neon(int n) { return layout_neon(n, 0); }
+XFFT_DEF size_t xfft_mem_size_neon(int n) { return layout_neon(n, 0); }
 
-void* xfft_init_neon(void* mem, int n)
+XFFT_DEF void* xfft_init_neon(void* mem, int n)
 {
     XFFT_ASSERT(XFFT_IS_ALIGNED(mem));
     if (n < XFFT_MIN_N || n > XFFT_MAX_N || (n & (n - 1)))
@@ -1056,7 +1065,7 @@ FI void cross_inv(const float* z, ptrdiff_t k, ptrdiff_t L, cv_neon* y0, cv_neon
     *y1 = (cv_neon){vaddq_f32(p1, q1), vsubq_f32(p1, q1)};
 }
 
-void xfft_forward_neon(void* p, const float* in, float* out)
+XFFT_DEF void xfft_forward_neon(void* p, const float* in, float* out)
 {
     XFFT_ASSERT(XFFT_IS_ALIGNED(p));
     XFFT_ASSERT(XFFT_IS_ALIGNED(in));
@@ -1137,7 +1146,7 @@ void xfft_forward_neon(void* p, const float* in, float* out)
     }
 }
 
-void xfft_inverse_neon(void* p, const float* in, float* out)
+XFFT_DEF void xfft_inverse_neon(void* p, const float* in, float* out)
 {
     XFFT_ASSERT(XFFT_IS_ALIGNED(p));
     XFFT_ASSERT(XFFT_IS_ALIGNED(in));
@@ -1222,15 +1231,15 @@ void xfft_inverse_neon(void* p, const float* in, float* out)
     }
 }
 
-const char* xfft_tell_neon(void) { return "neon"; }
+XFFT_DEF const char* xfft_tell_neon(void) { return "neon"; }
 
 #elif !defined(XFFT_NO_STUBS) // No AArch64 NEON (or XFFT_DISABLE_NEON): planning fails
 
-size_t      xfft_mem_size_neon(int n) { return 64; }
-void*       xfft_init_neon(void* mem, int n) { return 0; }
-void        xfft_forward_neon(void* p, const float* in, float* out) {}
-void        xfft_inverse_neon(void* p, const float* in, float* out) {}
-const char* xfft_tell_neon(void) { return "neon-stub"; }
+XFFT_DEF size_t      xfft_mem_size_neon(int n) { return 64; }
+XFFT_DEF void*       xfft_init_neon(void* mem, int n) { return 0; }
+XFFT_DEF void        xfft_forward_neon(void* p, const float* in, float* out) {}
+XFFT_DEF void        xfft_inverse_neon(void* p, const float* in, float* out) {}
+XFFT_DEF const char* xfft_tell_neon(void) { return "neon-stub"; }
 
 #endif // XFFT_NEON_ENABLED
 
@@ -1535,8 +1544,8 @@ FI void cross_offsets(const Plan_x86* plan, int32_t* off)
 
 #if defined(XFFT_AVX2_ENABLED)
 
-size_t xfft_mem_size_avx2(int n) { return layout_x86(n, 0); }
-void*  xfft_init_avx2(void* mem, int n) { return init_x86(mem, n); }
+XFFT_DEF size_t xfft_mem_size_avx2(int n) { return layout_x86(n, 0); }
+XFFT_DEF void*  xfft_init_avx2(void* mem, int n) { return init_x86(mem, n); }
 
 // a * w
 FI cv_x86 cv_mul_avx2(cv_x86 a, __m256 wr, __m256 wi)
@@ -1783,7 +1792,7 @@ FI void dense32_avx2(const float* m, const float* s, __m256* v)
         v[c] = _mm256_add_ps(a[0][c], a[1][c]);
 }
 
-void xfft_forward_avx2(void* p, const float* in, float* out)
+XFFT_DEF void xfft_forward_avx2(void* p, const float* in, float* out)
 {
     XFFT_ASSERT(XFFT_IS_ALIGNED(p));
     XFFT_ASSERT(XFFT_IS_ALIGNED(in));
@@ -1897,7 +1906,7 @@ void xfft_forward_avx2(void* p, const float* in, float* out)
     }
 }
 
-void xfft_inverse_avx2(void* p, const float* in, float* out)
+XFFT_DEF void xfft_inverse_avx2(void* p, const float* in, float* out)
 {
     XFFT_ASSERT(XFFT_IS_ALIGNED(p));
     XFFT_ASSERT(XFFT_IS_ALIGNED(in));
@@ -2005,15 +2014,15 @@ void xfft_inverse_avx2(void* p, const float* in, float* out)
     }
 }
 
-const char* xfft_tell_avx2(void) { return "avx2"; }
+XFFT_DEF const char* xfft_tell_avx2(void) { return "avx2"; }
 
 #elif !defined(XFFT_NO_STUBS) // No AVX2 + FMA (or XFFT_DISABLE_AVX2): planning fails
 
-size_t      xfft_mem_size_avx2(int n) { return 64; }
-void*       xfft_init_avx2(void* mem, int n) { return 0; }
-void        xfft_forward_avx2(void* p, const float* in, float* out) {}
-void        xfft_inverse_avx2(void* p, const float* in, float* out) {}
-const char* xfft_tell_avx2(void) { return "avx2-stub"; }
+XFFT_DEF size_t      xfft_mem_size_avx2(int n) { return 64; }
+XFFT_DEF void*       xfft_init_avx2(void* mem, int n) { return 0; }
+XFFT_DEF void        xfft_forward_avx2(void* p, const float* in, float* out) {}
+XFFT_DEF void        xfft_inverse_avx2(void* p, const float* in, float* out) {}
+XFFT_DEF const char* xfft_tell_avx2(void) { return "avx2-stub"; }
 
 #endif // XFFT_AVX2_ENABLED
 
@@ -2040,8 +2049,8 @@ const char* xfft_tell_avx2(void) { return "avx2-stub"; }
 
 #if defined(XFFT_AVX_ENABLED)
 
-size_t xfft_mem_size_avx(int n) { return layout_x86(n, 0); }
-void*  xfft_init_avx(void* mem, int n) { return init_x86(mem, n); }
+XFFT_DEF size_t xfft_mem_size_avx(int n) { return layout_x86(n, 0); }
+XFFT_DEF void*  xfft_init_avx(void* mem, int n) { return init_x86(mem, n); }
 
 // a * w
 FI cv_x86 cv_mul_avx(cv_x86 a, __m256 wr, __m256 wi)
@@ -2302,7 +2311,7 @@ FI void dense32_avx(const float* m, const float* s, __m256* v)
         v[c] = _mm256_add_ps(a[0][c], a[1][c]);
 }
 
-void xfft_forward_avx(void* p, const float* in, float* out)
+XFFT_DEF void xfft_forward_avx(void* p, const float* in, float* out)
 {
     XFFT_ASSERT(XFFT_IS_ALIGNED(p));
     XFFT_ASSERT(XFFT_IS_ALIGNED(in));
@@ -2418,7 +2427,7 @@ void xfft_forward_avx(void* p, const float* in, float* out)
     }
 }
 
-void xfft_inverse_avx(void* p, const float* in, float* out)
+XFFT_DEF void xfft_inverse_avx(void* p, const float* in, float* out)
 {
     XFFT_ASSERT(XFFT_IS_ALIGNED(p));
     XFFT_ASSERT(XFFT_IS_ALIGNED(in));
@@ -2529,15 +2538,15 @@ void xfft_inverse_avx(void* p, const float* in, float* out)
     }
 }
 
-const char* xfft_tell_avx(void) { return "avx"; }
+XFFT_DEF const char* xfft_tell_avx(void) { return "avx"; }
 
 #elif !defined(XFFT_NO_STUBS) // No AVX (or XFFT_DISABLE_AVX): planning fails
 
-size_t      xfft_mem_size_avx(int n) { return 64; }
-void*       xfft_init_avx(void* mem, int n) { return 0; }
-void        xfft_forward_avx(void* p, const float* in, float* out) {}
-void        xfft_inverse_avx(void* p, const float* in, float* out) {}
-const char* xfft_tell_avx(void) { return "avx-stub"; }
+XFFT_DEF size_t      xfft_mem_size_avx(int n) { return 64; }
+XFFT_DEF void*       xfft_init_avx(void* mem, int n) { return 0; }
+XFFT_DEF void        xfft_forward_avx(void* p, const float* in, float* out) {}
+XFFT_DEF void        xfft_inverse_avx(void* p, const float* in, float* out) {}
+XFFT_DEF const char* xfft_tell_avx(void) { return "avx-stub"; }
 
 #endif // XFFT_AVX_ENABLED
 
@@ -2635,7 +2644,7 @@ static int xfft_auto_backend(void)
     return b;
 }
 
-size_t xfft_mem_size_auto(int n)
+XFFT_DEF size_t xfft_mem_size_auto(int n)
 {
     switch (xfft_auto_backend())
     {
@@ -2650,7 +2659,7 @@ size_t xfft_mem_size_auto(int n)
     }
 }
 
-void* xfft_init_auto(void* mem, int n)
+XFFT_DEF void* xfft_init_auto(void* mem, int n)
 {
     switch (xfft_auto_backend())
     {
@@ -2665,7 +2674,7 @@ void* xfft_init_auto(void* mem, int n)
     }
 }
 
-void xfft_forward_auto(void* plan, const float* in, float* out)
+XFFT_DEF void xfft_forward_auto(void* plan, const float* in, float* out)
 {
     switch (xfft_auto_backend())
     {
@@ -2684,7 +2693,7 @@ void xfft_forward_auto(void* plan, const float* in, float* out)
     }
 }
 
-void xfft_inverse_auto(void* plan, const float* in, float* out)
+XFFT_DEF void xfft_inverse_auto(void* plan, const float* in, float* out)
 {
     switch (xfft_auto_backend())
     {
@@ -2703,7 +2712,7 @@ void xfft_inverse_auto(void* plan, const float* in, float* out)
     }
 }
 
-const char* xfft_tell_auto(void)
+XFFT_DEF const char* xfft_tell_auto(void)
 {
     switch (xfft_auto_backend())
     {
