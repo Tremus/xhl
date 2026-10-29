@@ -186,7 +186,7 @@ int main(void)
 #include <stddef.h>
 
 #define XFFT_MIN_N 32
-#define XFFT_MAX_N 8192
+#define XFFT_MAX_N 2097152
 #define XFFT_ALIGN 64
 
 // Linkage of every public function. Define as static before including to keep the whole library private to one .c file
