@@ -1,7 +1,7 @@
-// Tests xhl/time.h. On Linux this is blocked by time.h having no Linux branch
+// Tests xhl/time.h
 //
 // Not tested: xtime_timer_start/stop. They fire from the platform's main thread event loop (CFRunLoop / Win32 message
-// loop), which this program doesn't run
+// loop), which this program doesn't run. On Linux they aren't implemented by xhl at all (yet?)
 #ifdef _WIN32
 #define _CRT_SECURE_NO_WARNINGS
 #endif

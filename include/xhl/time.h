@@ -254,6 +254,45 @@ void xtime_timer_stop(XTimer* t)
     memset(t, 0, sizeof(*t));
 }
 
+#elif defined(__linux__)
+#include <errno.h>
+#include <time.h>
+
+uint64_t xhl_start_monotonic_ns;
+uint64_t xhl_unixtime_init;
+
+static uint64_t _xtime_timespec_to_ns(struct timespec ts) { return (uint64_t)ts.tv_sec * 1000000000 + ts.tv_nsec; }
+
+void xtime_init()
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    xhl_start_monotonic_ns = _xtime_timespec_to_ns(ts);
+
+    clock_gettime(CLOCK_REALTIME, &ts);
+    xhl_unixtime_init = _xtime_timespec_to_ns(ts) / 1000000;
+}
+
+uint64_t xtime_now_ns()
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return _xtime_timespec_to_ns(ts) - xhl_start_monotonic_ns;
+}
+
+void xtime_sleep_ms(uint32_t ms)
+{
+    struct timespec ts = {ms / 1000, (long)(ms % 1000) * 1000000};
+    // Resume with the remaining time if a signal interrupts the sleep
+    while (nanosleep(&ts, &ts) == -1 && errno == EINTR)
+    {
+    }
+}
+
+// TODO: figure out a solution for "xtime_timer_start" and "xtime_timer_stop"
+// Linux is a 1984 OS with no shared run loop. In audio plugin land, timers come from the host's event loop
+// eg. CLAP timer-support, VST3 IRunLoop, or a standalone apps event loop
+
 #elif defined(__EMSCRIPTEN__)
 #include <emscripten/emscripten.h>
 #include <emscripten/eventloop.h>
