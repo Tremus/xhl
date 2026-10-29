@@ -1758,6 +1758,44 @@ lane_stage_inv_avx2(const float* src, float* dst, int il, int L, int radix, int 
         lane_pass_inv_avx2(src, dst, il, L, 8, 1, 0, xt);
 }
 
+// Lane blocks up to this many vectors (64 B each) run their stages breadth-first: all of N <= 8192 (L <= 512).
+#define LANE_BLOCK_AVX2 512
+
+// Forward lane stages t..S-1 on the block of 'size' vectors at vector 'base' (stage 0 reads interleaved 'in').
+// DIF: after stage t the block is radix[t] independent sub-FFTs of span[t] vectors. A block bigger than
+// LANE_BLOCK_AVX2 finishes each sub-FFT depth-first while it's in cache, instead of one sweep of memory per stage.
+NI void lane_fwd_rec_avx2(const Plan_x86* plan, const float* in, float* work, const int* radix, const int* span,
+                          const int* twoff, int S, int t, ptrdiff_t base, int size)
+{
+    for (; t < S; t++)
+    {
+        const float* src = t ? work : in;
+        lane_stage_fwd_avx2(src + 16 * base, !t, work + 16 * base, size, radix[t], span[t], plan->stw + twoff[t],
+                            plan->xtw + 16 * base);
+        if (size > LANE_BLOCK_AVX2 && t + 1 < S)
+        {
+            for (int b = 0; b < radix[t]; b++)
+                lane_fwd_rec_avx2(plan, in, work, radix, span, twoff, S, t + 1, base + b * span[t], span[t]);
+            return;
+        }
+    }
+}
+
+// Adjoint of lane_fwd_rec_avx2 (DIT): stages S-1..t, the sub-FFTs first. Stage 0 writes interleaved 'out'.
+NI void lane_inv_rec_avx2(const Plan_x86* plan, float* work, float* out, const int* radix, const int* span,
+                          const int* twoff, int S, int t, ptrdiff_t base, int size)
+{
+    if (size > LANE_BLOCK_AVX2 && t + 1 < S)
+        for (int b = 0; b < radix[t]; b++)
+            lane_inv_rec_avx2(plan, work, out, radix, span, twoff, S, t + 1, base + b * span[t], span[t]);
+    for (int u = size > LANE_BLOCK_AVX2 ? t : S - 1; u >= t; u--)
+    {
+        float* dst = u ? work : out;
+        lane_stage_inv_avx2(work + 16 * base, dst + 16 * base, !u, size, radix[u], span[u], plan->stw + twoff[u],
+                            plan->xtw + 16 * base);
+    }
+}
+
 // Adds row 'r' of m times s[r] to a[c0..c1-1]
 FI void dense_row_avx2(const float* m, const float* s, int r, int c0, int c1, __m256* a)
 {
@@ -1830,17 +1868,19 @@ XFFT_DEF void xfft_forward_avx2(void* p, const float* in, float* out)
     _mm256_store_ps(plan->work + 16 * L + 8, _mm256_setzero_ps());
 
     {
-        // 1. Lane FFTs: interleaved input -> work, digit-reversed
-        int          radix[MAX_STAGES], span[MAX_STAGES], S = lane_stages_x86(L, radix, span);
-        const float* tw = plan->stw;
-        // The last stage (span 1) also applies the cross-lane twiddles
-        lane_stage_fwd_avx2(in, 1, work, L, radix[0], span[0], tw, plan->xtw);
-        tw += stage_tw(radix[0], span[0]);
-        for (int t = 1; t < S; t++)
+        // 1. Lane FFTs: interleaved input -> work, digit-reversed. The last stage (span 1) also applies the cross-lane
+        // twiddles
+        int radix[MAX_STAGES], span[MAX_STAGES], twoff[MAX_STAGES], S = lane_stages_x86(L, radix, span);
+        for (int t = 0, off = 0; t < S; t++)
         {
-            lane_stage_fwd_avx2(work, 0, work, L, radix[t], span[t], tw, plan->xtw);
-            tw += stage_tw(radix[t], span[t]);
+            twoff[t]  = off;
+            off      += stage_tw(radix[t], span[t]);
         }
+        if (L > LANE_BLOCK_AVX2)
+            lane_fwd_rec_avx2(plan, in, work, radix, span, twoff, S, 0, 0, L);
+        else // Same stages, but through the call N = 64..512 was 2-28% slower (xfft_avx2 it24)
+            for (int t = 0; t < S; t++)
+                lane_stage_fwd_avx2(t ? work : in, !t, work, L, radix[t], span[t], plan->stw + twoff[t], plan->xtw);
     }
     {
         // 2. Cross-lane: work (already twiddled) -> Z in natural order
@@ -2007,10 +2047,17 @@ XFFT_DEF void xfft_inverse_avx2(void* p, const float* in, float* out)
             twoff[t]  = off;
             off      += stage_tw(radix[t], span[t]);
         }
-        // The first of these (span 1) also applies the conj cross-lane twiddles
-        for (int t = S - 1; t > 0; t--)
-            lane_stage_inv_avx2(work, work, 0, L, radix[t], span[t], plan->stw + twoff[t], plan->xtw);
-        lane_stage_inv_avx2(work, out, 1, L, radix[0], span[0], plan->stw, plan->xtw);
+        // The first of these (span 1) also applies the conj cross-lane twiddles. lane_inv_rec_avx2 runs the same
+        // stages for L <= LANE_BLOCK_AVX2, but calling it there made 2048 inv ~6% slower (i5-7500): same stage code,
+        // so it's the codegen of this function's other loops
+        if (L > LANE_BLOCK_AVX2)
+            lane_inv_rec_avx2(plan, work, out, radix, span, twoff, S, 0, 0, L);
+        else
+        {
+            for (int t = S - 1; t > 0; t--)
+                lane_stage_inv_avx2(work, work, 0, L, radix[t], span[t], plan->stw + twoff[t], plan->xtw);
+            lane_stage_inv_avx2(work, out, 1, L, radix[0], span[0], plan->stw, plan->xtw);
+        }
     }
 }
 
@@ -2277,6 +2324,44 @@ lane_stage_inv_avx(const float* src, float* dst, int il, int L, int radix, int s
         lane_pass_inv_avx(src, dst, il, L, 8, 1, 0, xt);
 }
 
+// Lane blocks up to this many vectors (64 B each) run their stages breadth-first: all of N <= 8192 (L <= 512).
+#define LANE_BLOCK_AVX 512
+
+// Forward lane stages t..S-1 on the block of 'size' vectors at vector 'base' (stage 0 reads interleaved 'in').
+// DIF: after stage t the block is radix[t] independent sub-FFTs of span[t] vectors. A block bigger than
+// LANE_BLOCK_AVX finishes each sub-FFT depth-first while it's in cache, instead of one sweep of memory per stage.
+NI void lane_fwd_rec_avx(const Plan_x86* plan, const float* in, float* work, const int* radix, const int* span,
+                         const int* twoff, int S, int t, ptrdiff_t base, int size)
+{
+    for (; t < S; t++)
+    {
+        const float* src = t ? work : in;
+        lane_stage_fwd_avx(src + 16 * base, !t, work + 16 * base, size, radix[t], span[t], plan->stw + twoff[t],
+                           plan->xtw + 16 * base);
+        if (size > LANE_BLOCK_AVX && t + 1 < S)
+        {
+            for (int b = 0; b < radix[t]; b++)
+                lane_fwd_rec_avx(plan, in, work, radix, span, twoff, S, t + 1, base + b * span[t], span[t]);
+            return;
+        }
+    }
+}
+
+// Adjoint of lane_fwd_rec_avx (DIT): stages S-1..t, the sub-FFTs first. Stage 0 writes interleaved 'out'.
+NI void lane_inv_rec_avx(const Plan_x86* plan, float* work, float* out, const int* radix, const int* span,
+                         const int* twoff, int S, int t, ptrdiff_t base, int size)
+{
+    if (size > LANE_BLOCK_AVX && t + 1 < S)
+        for (int b = 0; b < radix[t]; b++)
+            lane_inv_rec_avx(plan, work, out, radix, span, twoff, S, t + 1, base + b * span[t], span[t]);
+    for (int u = size > LANE_BLOCK_AVX ? t : S - 1; u >= t; u--)
+    {
+        float* dst = u ? work : out;
+        lane_stage_inv_avx(work + 16 * base, dst + 16 * base, !u, size, radix[u], span[u], plan->stw + twoff[u],
+                           plan->xtw + 16 * base);
+    }
+}
+
 // Adds row 'r' of m times s[r] to a[c0..c1-1]
 FI void dense_row_avx(const float* m, const float* s, int r, int c0, int c1, __m256* a)
 {
@@ -2348,17 +2433,19 @@ XFFT_DEF void xfft_forward_avx(void* p, const float* in, float* out)
     _mm256_store_ps(plan->work + 16 * L + 8, _mm256_setzero_ps());
 
     {
-        // 1. Lane FFTs: interleaved input -> work, digit-reversed
-        int          radix[MAX_STAGES], span[MAX_STAGES], S = lane_stages_x86(L, radix, span);
-        const float* tw = plan->stw;
-        // The last stage (span 1) also applies the cross-lane twiddles
-        lane_stage_fwd_avx(in, 1, work, L, radix[0], span[0], tw, plan->xtw);
-        tw += stage_tw(radix[0], span[0]);
-        for (int t = 1; t < S; t++)
+        // 1. Lane FFTs: interleaved input -> work, digit-reversed. The last stage (span 1) also applies the cross-lane
+        // twiddles
+        int radix[MAX_STAGES], span[MAX_STAGES], twoff[MAX_STAGES], S = lane_stages_x86(L, radix, span);
+        for (int t = 0, off = 0; t < S; t++)
         {
-            lane_stage_fwd_avx(work, 0, work, L, radix[t], span[t], tw, plan->xtw);
-            tw += stage_tw(radix[t], span[t]);
+            twoff[t]  = off;
+            off      += stage_tw(radix[t], span[t]);
         }
+        if (L > LANE_BLOCK_AVX)
+            lane_fwd_rec_avx(plan, in, work, radix, span, twoff, S, 0, 0, L);
+        else // Same stages, but through the call N = 64..512 was 2-28% slower (xfft_avx2 it24)
+            for (int t = 0; t < S; t++)
+                lane_stage_fwd_avx(t ? work : in, !t, work, L, radix[t], span[t], plan->stw + twoff[t], plan->xtw);
     }
     {
         // 2. Cross-lane: work (already twiddled) -> Z in natural order
@@ -2532,9 +2619,15 @@ XFFT_DEF void xfft_inverse_avx(void* p, const float* in, float* out)
             off      += stage_tw(radix[t], span[t]);
         }
         // The first of these (span 1) also applies the conj cross-lane twiddles
-        for (int t = S - 1; t > 0; t--)
-            lane_stage_inv_avx(work, work, 0, L, radix[t], span[t], plan->stw + twoff[t], plan->xtw);
-        lane_stage_inv_avx(work, out, 1, L, radix[0], span[0], plan->stw, plan->xtw);
+        // lane_inv_rec_avx runs the same stages for L <= LANE_BLOCK_AVX, but slower there (xfft_avx2 it21)
+        if (L > LANE_BLOCK_AVX)
+            lane_inv_rec_avx(plan, work, out, radix, span, twoff, S, 0, 0, L);
+        else
+        {
+            for (int t = S - 1; t > 0; t--)
+                lane_stage_inv_avx(work, work, 0, L, radix[t], span[t], plan->stw + twoff[t], plan->xtw);
+            lane_stage_inv_avx(work, out, 1, L, radix[0], span[0], plan->stw, plan->xtw);
+        }
     }
 }
 
