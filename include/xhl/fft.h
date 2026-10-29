@@ -969,14 +969,14 @@ FI void bfly_neon(cv_neon* x, int R, int inv)
 
 // One forward lane pass (DIF) of radix R and span s: butterflies, then W_Rs^(m*j) from tw on output m when s > 1,
 // or the cross-lane twiddles xt when s == 1. R and s == 1 are compile-time constants at each call. Offsets are
-// pointer-sized and the twiddles walk a pointer (see xfft_avx2 it14).
+// pointer-sized and the twiddles walk a pointer (see xfft_avx2 it14). tw is null when s == 1, so w only walks if s > 1
 FI void lane_pass_fwd_neon(const float* src, float* dst, int L, int R, int s, const float* tw, const float* xt)
 {
     ptrdiff_t ss = 8 * (ptrdiff_t)s;
     for (ptrdiff_t o0 = 0; o0 < 8 * (ptrdiff_t)L; o0 += R * ss)
     {
         const float* w = tw;
-        for (ptrdiff_t o = o0; o < o0 + ss; o += 8, w += 4 * (R - 1))
+        for (ptrdiff_t o = o0; o < o0 + ss; o += 8, w += s > 1 ? 4 * (R - 1) : 0)
         {
             cv_neon x[8];
             for (int m = 0; m < R; m++)
@@ -1002,7 +1002,7 @@ FI void lane_pass_inv_neon(const float* src, float* dst, int L, int R, int s, co
     for (ptrdiff_t o0 = 0; o0 < 8 * (ptrdiff_t)L; o0 += R * ss)
     {
         const float* w = tw;
-        for (ptrdiff_t o = o0; o < o0 + ss; o += 8, w += 4 * (R - 1))
+        for (ptrdiff_t o = o0; o < o0 + ss; o += 8, w += s > 1 ? 4 * (R - 1) : 0)
         {
             cv_neon x[8];
             _Pragma("clang loop unroll(full)") for (int m = 0; m < R; m++)
