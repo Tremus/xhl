@@ -8,6 +8,7 @@ Very much a WIP. Do not use. Come back later!
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #if defined(__cplusplus) || __STDC_VERSION__ < 199901
 #define XTR_RESTRICT

@@ -40,7 +40,6 @@ extern "C" {
 #include <stdint.h>
 
 typedef void* xt_thread_ptr_t;
-typedef void* xt_tls_t;
 
 typedef volatile unsigned char      xt_atomic_uint8_t;
 typedef volatile unsigned short     xt_atomic_uint16_t;
@@ -254,7 +253,7 @@ static inline uint32_t xt_atomic_compare_exchange_u32_ordered(xt_atomic_uint32_t
     __atomic_compare_exchange_n(ptr, &expected, desired, 0, order, order);
     return expected;
 }
-static inline uint64_t xt_atomic_compare_exchange_u64_ordered(xt_atomic_uint64_t* ptr, uint64_t expected, uint64_t desired, enum xt_memory_order order)
+static inline uint64_t xt_atomic_compare_exchange_u64_ordered(xt_atomic_uint64_t* ptr, unsigned long long expected, uint64_t desired, enum xt_memory_order order)
 {
     xthread_assert(order != xt_memory_order_release && order != xt_memory_order_acq_rel);
     __atomic_compare_exchange_n(ptr, &expected, desired, 0, order, order);
@@ -284,16 +283,16 @@ static inline int32_t xt_atomic_compare_exchange_i32_ordered(xt_atomic_int32_t* 
 static inline int64_t xt_atomic_compare_exchange_i64_ordered(xt_atomic_int64_t* ptr, int64_t expected, int64_t desired, enum xt_memory_order order)
 {
     xthread_assert(order != xt_memory_order_release && order != xt_memory_order_acq_rel);
-    uint64_t exp = (uint64_t)expected;
+    unsigned long long exp = (unsigned long long)expected;
     __atomic_compare_exchange_n((xt_atomic_uint64_t*)ptr, &exp, (uint64_t)desired, 0, order, order);
     return (int64_t)exp;
 }
 
 #endif
 
-static inline void* xt_atomic_load_ptr(const xt_atomic_ptr_t* ptr) { return (void*)xt_atomic_load_u64((uint64_t*)ptr); }
-static inline void  xt_atomic_store_ptr(xt_atomic_ptr_t* ptr, void* v) { xt_atomic_store_u64((uint64_t*)ptr, (uint64_t)v); }
-static inline void* xt_atomic_exchange_ptr(xt_atomic_ptr_t* ptr, void* v) { return (void*)xt_atomic_exchange_u64((uint64_t*)ptr, (uint64_t)v); }
+static inline void* xt_atomic_load_ptr(const xt_atomic_ptr_t* ptr) { return (void*)xt_atomic_load_u64((const xt_atomic_uint64_t*)ptr); }
+static inline void  xt_atomic_store_ptr(xt_atomic_ptr_t* ptr, void* v) { xt_atomic_store_u64((xt_atomic_uint64_t*)ptr, (uint64_t)v); }
+static inline void* xt_atomic_exchange_ptr(xt_atomic_ptr_t* ptr, void* v) { return (void*)xt_atomic_exchange_u64((xt_atomic_uint64_t*)ptr, (uint64_t)v); }
 static inline bool  xt_atomic_compare_exchange_strong_ptr(xt_atomic_ptr_t* ptr, void* expected, void* desired) { return xt_atomic_compare_exchange_u64((xt_atomic_uint64_t*)ptr, (uint64_t)expected, (uint64_t)desired); }
 
 union xt_uif {unsigned u; int i; float f;};
@@ -321,12 +320,6 @@ static inline float xt_atomic_exchange_f32(xt_atomic_float* ptr, float v)
 void xthread_timer_init(xt_timer_t* timer);
 void xthread_timer_term(xt_timer_t* timer);
 void xthread_timer_wait(xt_timer_t* timer, uint64_t nanoseconds);
-
-xt_tls_t xthread_tls_create(void);
-
-void  xthread_tls_destroy(xt_tls_t tls);
-void  xthread_tls_set(xt_tls_t tls, void* value);
-void* xthread_tls_get(xt_tls_t tls);
 
 void  xthread_queue_init(xt_queue_t* queue, int size, void** values, int count);
 void  xthread_queue_term(xt_queue_t* queue);
@@ -450,18 +443,6 @@ void xthread_mutex_term(xt_mutex_t* mutex) { DeleteCriticalSection((CRITICAL_SEC
 void xthread_mutex_lock(xt_mutex_t* mutex) { EnterCriticalSection((CRITICAL_SECTION*)mutex); }
 void xthread_mutex_unlock(xt_mutex_t* mutex) { LeaveCriticalSection((CRITICAL_SECTION*)mutex); }
 
-xt_tls_t xthread_tls_create(void)
-{
-    DWORD tls = TlsAlloc();
-    if (tls == TLS_OUT_OF_INDEXES)
-        return NULL;
-    else
-        return (xt_tls_t)(uintptr_t)tls;
-}
-void  xthread_tls_destroy(xt_tls_t tls)              { TlsFree((DWORD)(uintptr_t)tls); }
-void  xthread_tls_set    (xt_tls_t tls, void* value) { TlsSetValue((DWORD)(uintptr_t)tls, value); }
-void* xthread_tls_get    (xt_tls_t tls)              { return TlsGetValue((DWORD)(uintptr_t)tls); }
-
 #elif defined(__linux__) || defined(__APPLE__) || defined(__ANDROID__)
 
 #include <errno.h>
@@ -505,18 +486,6 @@ void xthread_mutex_init(xt_mutex_t* mutex) { pthread_mutex_init((pthread_mutex_t
 void xthread_mutex_term(xt_mutex_t* mutex) { pthread_mutex_destroy((pthread_mutex_t*)mutex); }
 void xthread_mutex_lock(xt_mutex_t* mutex) { pthread_mutex_lock((pthread_mutex_t*)mutex); }
 void xthread_mutex_unlock(xt_mutex_t* mutex) { pthread_mutex_unlock((pthread_mutex_t*)mutex); }
-
-xt_tls_t xthread_tls_create(void)
-{
-    pthread_key_t tls;
-    if (pthread_key_create(&tls, NULL) == 0)
-        return (xt_tls_t)tls;
-    else
-        return NULL;
-}
-void  xthread_tls_destroy(xt_tls_t tls)          { pthread_key_delete((pthread_key_t)(uintptr_t)tls); }
-void  xthread_tls_set(xt_tls_t tls, void* value) { pthread_setspecific((pthread_key_t)(uintptr_t)tls, value); }
-void* xthread_tls_get(xt_tls_t tls)              { return pthread_getspecific((pthread_key_t)(uintptr_t)tls); }
 
 #else
 #error Unknown platform.

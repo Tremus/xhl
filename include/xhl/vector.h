@@ -2,6 +2,8 @@
 #define XHL_VECTOR_H
 // clang-format off
 
+#include <stdint.h>
+
 typedef union
 {
     struct { unsigned char tweak, patch, minor, major; };
