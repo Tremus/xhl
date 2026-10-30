@@ -1,8 +1,6 @@
-// Tests xhl/files.h. On Linux this is blocked by files.h having no Linux implementation
+// Tests xhl/files.h
 //
-// Usage: test_files <directory>
-// Creates <directory>/xhl_test_files, and moves it to the Trash/Recycle Bin when finished. CTest passes the build
-// directory.
+// Creates a uniquely named folder in the OS temp directory, and moves it to the Trash/Recycle Bin when finished
 //
 // Not tested: xfiles_open_file_explorer & xfiles_select_in_file_explorer, because they open windows. Try them by hand.
 // See files_watch.c for a much more thorough test of xfiles_watch_*
@@ -97,20 +95,18 @@ static void flush_until(XFilesWatchContext* ctx, const bool* flag)
     }
 }
 
-int main(int argc, char** argv)
+int main(void)
 {
-    if (argc < 2)
-    {
-        fprintf(stderr, "Usage: %s <directory>\n", argv[0]);
-        return 1;
-    }
-
     char root[512];
     char path_a[640];
     char path_b[640];
     char path_c[640];
     char subdir[640];
-    join_path(root, sizeof(root), argv[1], "xhl_test_files");
+    if (!xtest_temp_path(root, sizeof(root), "xhl_test_files"))
+    {
+        fprintf(stderr, "Couldn't find the temp directory\n");
+        return 1;
+    }
     join_path(path_a, sizeof(path_a), root, "a.txt");
     join_path(path_b, sizeof(path_b), root, "b.txt");
     join_path(subdir, sizeof(subdir), root, "sub");

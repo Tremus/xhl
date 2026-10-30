@@ -1,9 +1,10 @@
-// Tests xfiles_watch_* in xhl/files.h. FSEvents on macOS, ReadDirectoryChangesW on Windows
+// Tests xfiles_watch_* in xhl/files.h. FSEvents on macOS, ReadDirectoryChangesW on Windows, inotify on Linux
 //
 // Build (macOS):   clang -x objective-c files_watch.c -framework AppKit -o files_watch
 // Build (Windows): clang files_watch.c -o files_watch.exe
-// Run it from a folder you don't mind it creating ./temp and ./temp_outside in. Both are moved to the Trash/Recycle Bin
-// when it finishes
+// Build (Linux):   clang files_watch.c -o files_watch
+// Works in a uniquely named folder in the OS temp directory (see xtest_temp_path()), plus a sibling "_outside" folder.
+// Both are moved to the Trash/Recycle Bin when it finishes
 //
 // All file operations go through xfiles, so this also tests xfiles_write, xfiles_append, xfiles_move, xfiles_delete
 // and xfiles_trash
@@ -11,9 +12,11 @@
 // macOS: FSEvents uses one stream for the whole tree instead of one file descriptor per entry, so the number of open
 // fds should stay flat no matter how many files are watched.
 // Windows: ReadDirectoryChangesW uses one directory handle, so the number of open handles should stay flat.
+// Linux: inotify uses one fd for every watch, so the number of open fds should stay flat. Watches count against
+// /proc/sys/fs/inotify/max_user_watches instead
 //
 // This program:
-//   1. Creates ./temp and watches it with xfiles_watch_create()
+//   1. Creates the temp folder and watches it with xfiles_watch_create()
 //   2. Runs a set of scenarios (create, modify, rename, move, atomic save, move in/out, replace, delete, trash,
 //      folders) and checks each one produces the expected events. Renames and moves are expected as DELETED + CREATED
 //   3. Each round, creates temp/dir_NNNN, then 64 files inside it, then appends to the last file. The append must be
@@ -46,8 +49,12 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <sys/resource.h>
-#include <sys/sysctl.h>
 #include <unistd.h>
+#ifdef __APPLE__
+#include <sys/sysctl.h>
+#else
+#include <dirent.h>
+#endif
 #endif
 
 static int  g_assert_failures = 0;
@@ -72,15 +79,23 @@ static void on_xfiles_assert(const char* cond, int line)
 #define XHL_TIME_IMPL
 #include "../include/xhl/time.h"
 
+#include "xtest.h"
+
 #ifdef _WIN32
 // Windows can't inspect a path that no longer exists, so is_dir is always false for DELETED events
 #define DELETED_IS_DIR false
 // ReadDirectoryChangesW reports writing to a new file as CREATED followed by MODIFIED
 #define MODIFIED_AFTER_CREATED_OK true
 #define HANDLE_NAME               "handles"
-#else
+#elif defined(__APPLE__)
 #define DELETED_IS_DIR            true
 #define MODIFIED_AFTER_CREATED_OK false
+#define HANDLE_NAME               "fds"
+#else
+#define DELETED_IS_DIR true
+// Writing a new file is IN_CREATE followed by IN_CLOSE_WRITE. xfiles only drops the second when both arrive in the same
+// flush
+#define MODIFIED_AFTER_CREATED_OK true
 #define HANDLE_NAME               "fds"
 #endif
 
@@ -89,8 +104,8 @@ static void on_xfiles_assert(const char* cond, int line)
 #define EXPECT_CHANGED ((enum XFilesWatchType)100)
 
 // A file replaced by moving another file over it. macOS reports MODIFIED. Windows reports some mix of DELETED, CREATED
-// and MODIFIED
-#ifdef _WIN32
+// and MODIFIED. Linux reports CREATED (IN_MOVED_TO), since inotify doesn't say whether something was replaced
+#if defined(_WIN32) || defined(__linux__)
 #define REPLACED_TYPE EXPECT_CHANGED
 #else
 #define REPLACED_TYPE XFILES_WATCH_MODIFIED
@@ -253,7 +268,7 @@ static void flush_for(XFilesWatchContext* ctx, int ms)
     }
 }
 
-// Open fds on macOS, open handles on Windows
+// Open fds on macOS & Linux, open handles on Windows
 static int count_open_handles(int limit)
 {
 #ifdef _WIN32
@@ -261,6 +276,20 @@ static int count_open_handles(int limit)
     DWORD n = 0;
     GetProcessHandleCount(GetCurrentProcess(), &n);
     return (int)n;
+#elif defined(__linux__)
+    // The soft limit is often 1M+ on Linux, so list the open fds instead of probing each one
+    (void)limit;
+    int  n   = 0;
+    DIR* dir = opendir("/proc/self/fd");
+    if (dir)
+    {
+        for (struct dirent* e = readdir(dir); e; e = readdir(dir))
+            if (e->d_name[0] != '.')
+                n++;
+        closedir(dir);
+        n--; // The fd of 'dir' itself
+    }
+    return n;
 #else
     int n = 0;
     for (int fd = 0; fd < limit; fd++)
@@ -517,6 +546,8 @@ int main(int argc, char** argv)
         }
         getrlimit(RLIMIT_NOFILE, &rl);
 
+        fprintf(stderr, "RLIMIT_NOFILE soft limit: %llu\n", (unsigned long long)rl.rlim_cur);
+#ifdef __APPLE__
         int    maxfilesperproc = 0;
         size_t sz              = sizeof(maxfilesperproc);
         sysctlbyname("kern.maxfilesperproc", &maxfilesperproc, &sz, NULL, 0);
@@ -525,8 +556,10 @@ int main(int argc, char** argv)
         if (rl.rlim_cur < (rlim_t)fd_limit)
             fd_limit = (int)rl.rlim_cur;
 
-        fprintf(stderr, "RLIMIT_NOFILE soft limit: %llu\n", (unsigned long long)rl.rlim_cur);
         fprintf(stderr, "kern.maxfilesperproc:     %d\n", maxfilesperproc);
+#else
+        fd_limit = rl.rlim_cur > INT_MAX ? INT_MAX : (int)rl.rlim_cur;
+#endif
         fprintf(stderr, "Effective fd limit:       %d\n", fd_limit);
     }
 #else
@@ -536,15 +569,11 @@ int main(int argc, char** argv)
 
     // Set up paths
     {
-        char cwd[PATH_MAX];
-#ifdef _WIN32
-        if (!GetCurrentDirectoryA(sizeof(cwd), cwd))
+        if (!xtest_temp_path(g_root, sizeof(g_root), "xhl_files_watch"))
+        {
+            fprintf(stderr, "Couldn't find the temp directory\n");
             return 1;
-#else
-        if (!getcwd(cwd, sizeof(cwd)))
-            return 1;
-#endif
-        snprintf(g_root, sizeof(g_root), "%s" XFILES_DIR_STR "temp", cwd);
+        }
         snprintf(g_outside, sizeof(g_outside), "%s_outside", g_root);
 
         remove_temp();

@@ -26,7 +26,7 @@ elseif(APPLE)
     set(XHL_TIME_LIBS "-framework CoreFoundation")
     set(XHL_FILES_LIBS "-framework AppKit")
     set(XHL_SYSTEM_LIBS "-framework AppKit" "-framework IOKit" "-framework Metal")
-    set_source_files_properties(tests/test_files.c tests/test_system.c PROPERTIES LANGUAGE OBJC)
+    set_source_files_properties(tests/test_files.c tests/files_watch.c tests/test_system.c PROPERTIES LANGUAGE OBJC)
 endif()
 
 add_executable(test_alloc tests/test_alloc.c)
@@ -37,11 +37,16 @@ add_executable(test_time tests/test_time.c)
 target_link_libraries(test_time PRIVATE ${XHL_TIME_LIBS})
 add_test(NAME time COMMAND test_time)
 
-# Writes temporary files into the build directory, then moves them to the Trash/Recycle Bin
+# Writes temporary files into the OS temp directory, then moves them to the Trash/Recycle Bin
 add_executable(test_files tests/test_files.c)
 target_link_libraries(test_files PRIVATE ${XHL_FILES_LIBS})
-file(TO_NATIVE_PATH "${CMAKE_CURRENT_BINARY_DIR}" XHL_TEST_FILES_DIR)
-add_test(NAME files COMMAND test_files "${XHL_TEST_FILES_DIR}")
+add_test(NAME files COMMAND test_files)
+
+# Stress tests xfiles_watch_* with ~10000 entries. Writes temporary files into the OS temp directory, then moves them to
+# the Trash/Recycle Bin. Takes ~10s on Linux
+add_executable(files_watch tests/files_watch.c)
+target_link_libraries(files_watch PRIVATE ${XHL_FILES_LIBS} ${XHL_TIME_LIBS})
+add_test(NAME files_watch COMMAND files_watch)
 
 add_executable(test_system tests/test_system.c)
 target_link_libraries(test_system PRIVATE ${XHL_SYSTEM_LIBS})

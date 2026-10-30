@@ -2,7 +2,7 @@
  * Released into the public domain by Tré Dudman - 2024
  * For licensing and more info see https://github.com/Tremus/xhl
  *
- * stdio.h FILE* replacement for Windows & macOS
+ * stdio.h FILE* replacement for Windows, macOS & Linux
  * Contains a few extra nice to have features not offered by libc
  * All strings are assumed to be NULL terminated with UTF8 encoding
  *
@@ -37,10 +37,13 @@
  * BUILDING:
  * Simply #define XHL_FILES_IMPL in one of your build targets before including this header
  * MacOS: Requires Objective-C/Objective-C++ for some functions. Supports both ARC and no ARC
+ * Linux: Requires the GNU/default extensions of glibc (-std=gnu99, or define _DEFAULT_SOURCE). Plain -std=c99 hides
+ * syscall(), realpath() and friends
  *
  * LINKING:
  * Windows: Kernel32 Shell32 Shlwapi
  * macOS: -framework AppKit (or -framework CoreServices if you don't need the Objective-C functions)
+ * Linux: Nothing :D
  *
  * CREDITS:
  * Randy Gaul. 'xfiles_list' is a modified version of 'cf_scan' from the cute_files library
@@ -154,10 +157,14 @@ int main()
 #define XFILES_BROWSER_NAME "File Explorer"
 #define XFILES_TRASH_NAME   "Recycle Bin"
 #else
-#define XFILES_DIR_STR      "/"
-#define XFILES_DIR_CHAR     '/'
+#define XFILES_DIR_STR    "/"
+#define XFILES_DIR_CHAR   '/'
+#define XFILES_TRASH_NAME "Trash"
+#ifdef __APPLE__
 #define XFILES_BROWSER_NAME "Finder"
-#define XFILES_TRASH_NAME   "Trash"
+#else
+#define XFILES_BROWSER_NAME "File Manager"
+#endif
 #endif
 
 #define XFILES_ARRLEN(arr) (sizeof(arr) / sizeof(arr[0]))
@@ -254,18 +261,22 @@ bool xfiles_move(const char* from, const char* to, XFilesMoveFlags flags);
 
 // Moves the file to:
 // Win: Recycle Bin /
-// OSX: Trash
+// OSX: Trash /
+// Linux: freedesktop.org Trash. ~/.local/share/Trash, or .Trash-$uid at the top of the drive for other drives
 bool xfiles_trash(const char* path);
 // No bins. File is deleted and is likely unrecoverable
 bool xfiles_delete(const char* path);
 // Opens OS file or folder as if it was opened with
 // Win: File Explorer /
-// OSX: Finder
+// OSX: Finder /
+// Linux: xdg-open. Returns true if xdg-open was started, even if it then fails
 // NOTE: this is a blocking call
 bool xfiles_open_file_explorer(const char* path);
 // Opens OS file browsing app with path selected
 // Win: File Explorer /
-// OSX: Finder
+// OSX: Finder /
+// Linux: org.freedesktop.FileManager1.ShowItems over D-Bus. If the file manager doesn't support it, opens the parent
+// folder with xdg-open
 // NOTE: this is a blocking call
 bool xfiles_select_in_file_explorer(const char* path);
 
@@ -273,10 +284,14 @@ typedef enum XFilesUserDirectory
 {
     // Windows: {letter}:\\Users\\{username}
     // macOS: /Users/{username}
+    // Linux: $HOME, usually /home/{username}
     XFILES_USER_DIRECTORY_HOME,
     // Windows: [HOME]\\AppData\\Roaming
     // macOS: [HOME]/Library/Application\ Support
+    // Linux: $XDG_CONFIG_HOME, default [HOME]/.config
     XFILES_USER_DIRECTORY_APPDATA,
+    // Linux: The rest come from $XDG_CONFIG_HOME/user-dirs.dirs, so they may be translated, eg. [HOME]/Bureau.
+    // Defaults to [HOME]/Desktop etc. Not checked to exist
     XFILES_USER_DIRECTORY_DESKTOP,
     XFILES_USER_DIRECTORY_DOCUMENTS,
     XFILES_USER_DIRECTORY_DOWNLOADS,
@@ -303,15 +318,15 @@ typedef enum XFilesMetadataType
 
 typedef struct XFilesMetadata
 {
-    int                last_error; // errno on macOS, GetLastError() on Windows
+    int                last_error; // errno on macOS & Linux, GetLastError() on Windows
     XFilesMetadataType type;
 
     uint64_t size_bytes;
 
     // Convenience
     bool is_readonly;
-    bool is_hidden;
-    bool is_system;
+    bool is_hidden;     // Linux: name starts with '.'
+    bool is_system;     // Always false on Linux
     bool is_archive;    // Windows only, its for backing up files
     bool is_compressed; // (UF_COMPRESSED, FILE_ATTRIBUTE_COMPRESSED). Not to be confused with zip/7z/tar/gz/rar
     bool is_encrypted;
@@ -319,10 +334,10 @@ typedef struct XFilesMetadata
     bool is_symlink;
 
     // Unix epoch times in nanoseconds
-    uint64_t creation_time_ns;      // File creation time (birthtime / CreationTime)
+    uint64_t creation_time_ns; // File creation time (birthtime / CreationTime). 0 if the filesystem doesn't store it
     uint64_t modification_time_ns;  // Last write time (mtime / LastWriteTime)
     uint64_t access_time_ns;        // Last access time (atime / LastAccessTime)
-    uint64_t status_change_time_ns; // POSIX ctime (macOS only, 0 on Windows)
+    uint64_t status_change_time_ns; // POSIX ctime (0 on Windows)
 
     // Stuff you probably dont want
 
@@ -339,8 +354,8 @@ typedef struct XFilesMetadata
     uint32_t _st_mode;    // File mode bits (POSIX)
     uint32_t _st_blksize; // Preferred I/O block size
     uint64_t _st_blocks;  // Number of 512-byte blocks allocated
-    uint32_t _st_flags;   // User-defined flags (macOS BSD flags)
-    uint32_t _st_gen;     // File generation number (macOS)
+    uint32_t _st_flags;   // User-defined flags (macOS BSD flags). 0 on Linux
+    uint32_t _st_gen;     // File generation number (macOS). 0 on Linux
 } XFilesMetadata;
 
 XFilesMetadata xfiles_get_metadata(const char* path);
@@ -354,7 +369,8 @@ typedef struct xfiles_list_item_t
     unsigned ext_idx;
     bool     is_dir;
 
-    // Unix epoch time in nanoseconds. Free on Windows. On macOS it costs a stat per file, and is 0 for directories
+    // Unix epoch time in nanoseconds. Free on Windows. On macOS & Linux it costs a stat per file, and is 0 for
+    // directories
     uint64_t last_modified_ns;
 } xfiles_list_item_t;
 
@@ -362,7 +378,7 @@ typedef void(xfiles_list_callback_t)(void* data, const xfiles_list_item_t* item)
 // Calls the above callback for each item in a directory
 void xfiles_list(const char* path, void* data, xfiles_list_callback_t* cb);
 
-// NOTE: Treat these events as hints, not a perfect log. Both OSes coalesce and occasionally reorder events, so you may
+// NOTE: Treat these events as hints, not a perfect log. All OSes coalesce and occasionally reorder events, so you may
 // see a DELETED for a path you never saw created, or a MODIFIED for a file you have never seen before. If your app
 // needs an exact file tree, rescan the affected folder when you receive an event for it.
 enum XFilesWatchType
@@ -377,11 +393,16 @@ enum XFilesWatchType
     // File path stays the same, contents or metadata was modified in some way
     // Many editors save files 'atomically' by writing a temp file then renaming it over the original. On macOS these
     // saves arrive as MODIFIED for the saved file, with DELETED for the temp file. On Windows expect some mix of
-    // DELETED, CREATED and MODIFIED for the saved file
+    // DELETED, CREATED and MODIFIED for the saved file. On Linux they arrive as CREATED for the saved file, with
+    // DELETED for the temp file
+    // On Linux this fires when a file opened for writing is closed, so you won't see it for files that are kept open
+    // or written through mmap
     XFILES_WATCH_MODIFIED,
     // Events were lost and you should rescan 'path'. On Windows this happens when more than 64kb of events arrive
     // between flushes. On macOS this happens when FSEvents drops events, the watched folder itself is moved or
-    // deleted, or more events arrive between flushes than fit in our buffer.
+    // deleted, or more events arrive between flushes than fit in our buffer. On Linux this happens when the kernel's
+    // queue fills up (/proc/sys/fs/inotify/max_queued_events, usually 16384), or the watched folder itself is moved or
+    // deleted. Folders past the /proc/sys/fs/inotify/max_user_watches limit go unwatched without any warning
     XFILES_WATCH_OVERFLOW,
 };
 typedef struct XFilesWatchEvent
@@ -1257,14 +1278,39 @@ void xfiles_watch_destroy(XFilesWatchContext* _ctx)
 
 #endif // _WIN32
 
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(__linux__)
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+static uint64_t _xfiles_timespec_ns(struct timespec ts)
+{
+    return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
+}
+
+static XFilesMetadataType _xfiles_metadata_type(mode_t mode)
+{
+    if (S_ISREG(mode))
+        return XFILES_METADATA_TYPE_FILE;
+    if (S_ISDIR(mode))
+        return XFILES_METADATA_TYPE_DIRECTORY;
+    if (S_ISLNK(mode))
+        return XFILES_METADATA_TYPE_SYMLINK;
+    if (S_ISBLK(mode))
+        return XFILES_METADATA_TYPE_BLOCK_DEVICE;
+    if (S_ISCHR(mode))
+        return XFILES_METADATA_TYPE_CHAR_DEVICE;
+    if (S_ISFIFO(mode))
+        return XFILES_METADATA_TYPE_FIFO;
+    if (S_ISSOCK(mode))
+        return XFILES_METADATA_TYPE_SOCKET;
+    return XFILES_METADATA_TYPE_UNKNOWN;
+}
 
 // https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/access.2.html
 bool xfiles_exists(const char* path) { return access(path, F_OK) == 0; }
@@ -1455,16 +1501,19 @@ bool xfiles_append(const char* path, const char* in, size_t inlen)
     return nwritten != -1;
 }
 
+#ifdef __APPLE__
 // https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/rename.2.html
 bool xfiles_move(const char* from, const char* to, XFilesMoveFlags flags)
 {
     unsigned int rename_flags = (flags & XFILES_MOVE_OVERWRITE) ? 0 : RENAME_EXCL;
     return 0 == renamex_np(from, to, rename_flags);
 }
+#endif // __APPLE__
 
 // https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/unlink.2.html
 bool xfiles_delete(const char* path) { return unlink(path) == 0; }
 
+#ifdef __APPLE__
 XFilesMetadata xfiles_get_metadata(const char* path)
 {
     XFilesMetadata meta = {0};
@@ -1485,11 +1534,11 @@ XFilesMetadata xfiles_get_metadata(const char* path)
     }
 
     // Unified fields
-    meta.size_bytes       = (uint64_t)st.st_size;
-    meta.creation_time_ns = (uint64_t)st.st_birthtimespec.tv_sec * 1000000000LL + (uint64_t)st.st_birthtimespec.tv_nsec;
-    meta.modification_time_ns  = (uint64_t)st.st_mtimespec.tv_sec * 1000000000LL + (uint64_t)st.st_mtimespec.tv_nsec;
-    meta.access_time_ns        = (uint64_t)st.st_atimespec.tv_sec * 1000000000LL + (uint64_t)st.st_atimespec.tv_nsec;
-    meta.status_change_time_ns = (uint64_t)st.st_ctimespec.tv_sec * 1000000000LL + (uint64_t)st.st_ctimespec.tv_nsec;
+    meta.size_bytes            = (uint64_t)st.st_size;
+    meta.creation_time_ns      = _xfiles_timespec_ns(st.st_birthtimespec);
+    meta.modification_time_ns  = _xfiles_timespec_ns(st.st_mtimespec);
+    meta.access_time_ns        = _xfiles_timespec_ns(st.st_atimespec);
+    meta.status_change_time_ns = _xfiles_timespec_ns(st.st_ctimespec);
     meta.file_index            = st.st_ino;
     meta.num_links             = st.st_nlink;
     meta.volume_serial_number  = st.st_dev;
@@ -1500,35 +1549,7 @@ XFilesMetadata xfiles_get_metadata(const char* path)
     meta._st_flags   = st.st_flags;
     meta._st_gen     = st.st_gen;
 
-    // Determine type
-    if (S_ISREG(st.st_mode))
-    {
-        meta.type = XFILES_METADATA_TYPE_FILE;
-    }
-    else if (S_ISDIR(st.st_mode))
-    {
-        meta.type = XFILES_METADATA_TYPE_DIRECTORY;
-    }
-    else if (S_ISLNK(st.st_mode))
-    {
-        meta.type = XFILES_METADATA_TYPE_SYMLINK;
-    }
-    else if (S_ISBLK(st.st_mode))
-    {
-        meta.type = XFILES_METADATA_TYPE_BLOCK_DEVICE;
-    }
-    else if (S_ISCHR(st.st_mode))
-    {
-        meta.type = XFILES_METADATA_TYPE_CHAR_DEVICE;
-    }
-    else if (S_ISFIFO(st.st_mode))
-    {
-        meta.type = XFILES_METADATA_TYPE_FIFO;
-    }
-    else if (S_ISSOCK(st.st_mode))
-    {
-        meta.type = XFILES_METADATA_TYPE_SOCKET;
-    }
+    meta.type = _xfiles_metadata_type(st.st_mode);
 
     // Convenience boolean flags (BSD-style)
     // st_flags on macOS: UF_HIDDEN, UF_IMMUTABLE, UF_COMPRESSED, etc.
@@ -1543,6 +1564,7 @@ XFilesMetadata xfiles_get_metadata(const char* path)
 
     return meta;
 }
+#endif // __APPLE__
 
 void xfiles_list(const char* path, void* data, xfiles_list_callback_t* callback)
 {
@@ -1562,13 +1584,14 @@ void xfiles_list(const char* path, void* data, xfiles_list_callback_t* callback)
 
     while (entry)
     {
-        item.path_len = item.name_idx + entry->d_namlen;
+        size_t namelen = strlen(entry->d_name);
+        item.path_len  = item.name_idx + namelen;
 
         XFILES_ASSERT(item.path_len < sizeof(item.path));
         if (item.path_len >= sizeof(item.path)) // Guard overflow
             goto iterate;
 
-        memcpy(&item.path[item.name_idx], entry->d_name, entry->d_namlen);
+        memcpy(&item.path[item.name_idx], entry->d_name, namelen);
         item.path[item.path_len] = 0;
 
         item.ext_idx = item.name_idx;
@@ -1577,15 +1600,24 @@ void xfiles_list(const char* path, void* data, xfiles_list_callback_t* callback)
                 item.ext_idx = i;
         if (item.ext_idx == item.name_idx) // Failed to find extension
             item.ext_idx = item.path_len;
-        item.is_dir = DT_DIR & entry->d_type;
+        item.is_dir = entry->d_type == DT_DIR;
 
         item.last_modified_ns = 0;
         if (!item.is_dir)
         {
             struct stat st;
             if (fstatat(dirfd(dir), entry->d_name, &st, AT_SYMLINK_NOFOLLOW) == 0)
-                item.last_modified_ns =
-                    (uint64_t)st.st_mtimespec.tv_sec * 1000000000ULL + (uint64_t)st.st_mtimespec.tv_nsec;
+            {
+                // Some filesystems on Linux don't fill in d_type
+                if (entry->d_type == DT_UNKNOWN)
+                    item.is_dir = S_ISDIR(st.st_mode);
+                if (!item.is_dir)
+#ifdef __APPLE__
+                    item.last_modified_ns = _xfiles_timespec_ns(st.st_mtimespec);
+#else
+                    item.last_modified_ns = _xfiles_timespec_ns(st.st_mtim);
+#endif
+            }
         }
 
         XFILES_ASSERT(strlen(item.path) == item.path_len);
@@ -1599,7 +1631,9 @@ void xfiles_list(const char* path, void* data, xfiles_list_callback_t* callback)
     if (dir)
         closedir(dir);
 }
+#endif // __APPLE__ || __linux__
 
+#ifdef __APPLE__
 // File watching using FSEvents. Requires macOS 10.7+
 //
 // Threading:
@@ -2072,6 +2106,982 @@ int xfiles_get_user_directory(char* out, size_t outlen, XFilesUserDirectory loc)
 
 #endif // __OBJC__
 #endif // __APPLE__
+
+#ifdef __linux__
+#include <linux/stat.h> // struct statx. glibc only declares it with _GNU_SOURCE
+#include <pwd.h>
+#include <spawn.h>
+#include <sys/inotify.h>
+#include <sys/syscall.h>
+#include <sys/sysmacros.h>
+#include <sys/wait.h>
+#include <time.h>
+
+#ifndef RENAME_NOREPLACE
+#define RENAME_NOREPLACE (1 << 0)
+#endif
+
+extern char** environ;
+
+// https://man7.org/linux/man-pages/man2/rename.2.html
+bool xfiles_move(const char* from, const char* to, XFilesMoveFlags flags)
+{
+    if (flags & XFILES_MOVE_OVERWRITE)
+        return rename(from, to) == 0;
+
+    // renameat2() is only declared with _GNU_SOURCE, so call the syscall. Requires Linux 3.15+
+    if (syscall(SYS_renameat2, AT_FDCWD, from, AT_FDCWD, to, RENAME_NOREPLACE) == 0)
+        return true;
+    // Some filesystems (eg. some network & FUSE filesystems) don't support RENAME_NOREPLACE. Fall back to a check
+    // followed by a rename, which isn't atomic
+    if (errno != EINVAL && errno != ENOSYS)
+        return false;
+    struct stat st;
+    if (lstat(to, &st) == 0)
+    {
+        errno = EEXIST;
+        return false;
+    }
+    return rename(from, to) == 0;
+}
+
+XFilesMetadata xfiles_get_metadata(const char* path)
+{
+    XFilesMetadata meta = {0};
+
+    if (path == NULL || path[0] == '\0')
+    {
+        meta.last_error = -1;
+        return meta;
+    }
+
+    // statx is the only way to get the creation time. Requires Linux 4.11+, and some sandboxes block it, so fall back
+    // to lstat. AT_SYMLINK_NOFOLLOW so symlinks are reported as symlinks
+    // https://man7.org/linux/man-pages/man2/statx.2.html
+    struct statx stx = {0};
+    if (syscall(SYS_statx, AT_FDCWD, path, AT_SYMLINK_NOFOLLOW, STATX_BASIC_STATS | STATX_BTIME, &stx) != 0)
+    {
+        struct stat st;
+        if ((errno != ENOSYS && errno != EPERM) || lstat(path, &st) != 0)
+        {
+            meta.last_error = (int32_t)errno;
+            return meta;
+        }
+        stx.stx_mode          = st.st_mode;
+        stx.stx_size          = st.st_size;
+        stx.stx_mtime.tv_sec  = st.st_mtim.tv_sec;
+        stx.stx_mtime.tv_nsec = st.st_mtim.tv_nsec;
+        stx.stx_atime.tv_sec  = st.st_atim.tv_sec;
+        stx.stx_atime.tv_nsec = st.st_atim.tv_nsec;
+        stx.stx_ctime.tv_sec  = st.st_ctim.tv_sec;
+        stx.stx_ctime.tv_nsec = st.st_ctim.tv_nsec;
+        stx.stx_ino           = st.st_ino;
+        stx.stx_nlink         = st.st_nlink;
+        stx.stx_dev_major     = major(st.st_dev);
+        stx.stx_dev_minor     = minor(st.st_dev);
+        stx.stx_blksize       = st.st_blksize;
+        stx.stx_blocks        = st.st_blocks;
+    }
+
+    meta.size_bytes = stx.stx_size;
+    // 0 if the filesystem doesn't record it (eg. some network filesystems)
+    if (stx.stx_mask & STATX_BTIME)
+        meta.creation_time_ns = (uint64_t)stx.stx_btime.tv_sec * 1000000000ULL + stx.stx_btime.tv_nsec;
+    meta.modification_time_ns  = (uint64_t)stx.stx_mtime.tv_sec * 1000000000ULL + stx.stx_mtime.tv_nsec;
+    meta.access_time_ns        = (uint64_t)stx.stx_atime.tv_sec * 1000000000ULL + stx.stx_atime.tv_nsec;
+    meta.status_change_time_ns = (uint64_t)stx.stx_ctime.tv_sec * 1000000000ULL + stx.stx_ctime.tv_nsec;
+    meta.file_index            = stx.stx_ino;
+    meta.num_links             = stx.stx_nlink;
+    meta.volume_serial_number  = (uint32_t)makedev(stx.stx_dev_major, stx.stx_dev_minor);
+
+    meta._st_mode    = stx.stx_mode;
+    meta._st_blksize = stx.stx_blksize;
+    meta._st_blocks  = stx.stx_blocks;
+
+    meta.type = _xfiles_metadata_type(stx.stx_mode);
+
+    const char* name   = xfiles_get_name(path);
+    meta.is_readonly   = (stx.stx_mode & 0222) == 0 || (stx.stx_attributes & STATX_ATTR_IMMUTABLE);
+    meta.is_hidden     = (name ? name : path)[0] == '.'; // Dotfiles are hidden by convention
+    meta.is_system     = false;
+    meta.is_archive    = false;
+    meta.is_compressed = (stx.stx_attributes & STATX_ATTR_COMPRESSED) != 0;
+    meta.is_encrypted  = (stx.stx_attributes & STATX_ATTR_ENCRYPTED) != 0;
+    meta.is_executable = (stx.stx_mode & 0111) != 0;
+    meta.is_symlink    = S_ISLNK(stx.stx_mode) ? true : false;
+
+    return meta;
+}
+
+// Writes 'a' followed by 'b' to 'out'. Returns the length excluding the null terminating byte, or 0 if it doesn't fit
+static int _xfiles_concat(char* out, size_t outlen, const char* a, size_t alen, const char* b, size_t blen)
+{
+    if (alen + blen + 1 > outlen)
+        return 0;
+    memmove(out, a, alen);
+    memcpy(out + alen, b, blen);
+    out[alen + blen] = '\0';
+    return (int)(alen + blen);
+}
+
+// Absolute path without following the last component, so a symlink is trashed rather than its target
+static bool _xfiles_absolute_path(const char* path, char out[PATH_MAX])
+{
+    size_t len = strlen(path);
+    while (len > 1 && path[len - 1] == '/')
+        len--;
+    size_t name_idx = len;
+    while (name_idx > 0 && path[name_idx - 1] != '/')
+        name_idx--;
+
+    const char* name    = path + name_idx;
+    size_t      namelen = len - name_idx;
+    if (namelen == 0 || (namelen == 1 && name[0] == '.') || (namelen == 2 && name[0] == '.' && name[1] == '.'))
+        return false;
+
+    char parent[PATH_MAX];
+    if (name_idx == 0)
+        snprintf(parent, sizeof(parent), ".");
+    else if (name_idx == 1)
+        snprintf(parent, sizeof(parent), "/");
+    else
+        snprintf(parent, sizeof(parent), "%.*s", (int)(name_idx - 1), path);
+
+    if (!realpath(parent, out))
+        return false;
+    size_t parentlen = strlen(out);
+    if (out[parentlen - 1] != '/')
+        out[parentlen++] = '/';
+    return _xfiles_concat(out, PATH_MAX, out, parentlen, name, namelen) != 0;
+}
+
+// Percent encodes everything except unreserved characters and '/', for file:// URIs and .trashinfo files
+static bool _xfiles_uri_encode(const char* in, char* out, size_t outlen)
+{
+    static const char HEX[] = "0123456789ABCDEF";
+    size_t            n     = 0;
+    for (const unsigned char* c = (const unsigned char*)in; *c; c++)
+    {
+        bool keep = (*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z') || (*c >= '0' && *c <= '9') || *c == '-' ||
+                    *c == '_' || *c == '.' || *c == '~' || *c == '/';
+        if (n + (keep ? 1 : 3) >= outlen)
+            return false;
+        if (keep)
+        {
+            out[n++] = *c;
+        }
+        else
+        {
+            out[n++] = '%';
+            out[n++] = HEX[*c >> 4];
+            out[n++] = HEX[*c & 15];
+        }
+    }
+    out[n] = '\0';
+    return true;
+}
+
+static bool _xfiles_mkdir_private(const char* path) { return mkdir(path, 0700) == 0 || errno == EEXIST; }
+
+// Finds or creates the trash folder for a file on device 'dev'
+// Sets 'topdir' to the mount point the trash is in, or an empty string for the home trash
+// https://specifications.freedesktop.org/trash-spec/latest/
+static bool _xfiles_find_trash(const char* abspath, dev_t dev, char trash[PATH_MAX], char topdir[PATH_MAX])
+{
+    struct stat st;
+    topdir[0] = '\0';
+
+    // Home trash: $XDG_DATA_HOME/Trash
+    {
+        char        datahome[PATH_MAX];
+        const char* xdg = getenv("XDG_DATA_HOME");
+        if (xdg && xdg[0] == '/')
+            snprintf(datahome, sizeof(datahome), "%s", xdg);
+        else if (xfiles_get_user_directory(datahome, sizeof(datahome), XFILES_USER_DIRECTORY_HOME))
+            snprintf(datahome + strlen(datahome), sizeof(datahome) - strlen(datahome), "/.local/share");
+        else
+            datahome[0] = '\0';
+
+        if (datahome[0] && xfiles_create_directory_recursive(datahome))
+        {
+            snprintf(trash, PATH_MAX, "%s/Trash", datahome);
+            if (_xfiles_mkdir_private(trash) && stat(trash, &st) == 0 && st.st_dev == dev)
+                return true;
+        }
+    }
+
+    // The file is on another device. Use a trash at the top of its mount point. Moving it to the home trash would copy
+    // it, which could take a long time, and the spec doesn't require it
+    // Walk up from the file until the parent is on a different device
+    snprintf(topdir, PATH_MAX, "%s", abspath);
+    for (;;)
+    {
+        char* slash = strrchr(topdir, '/');
+        if (slash == topdir)
+        {
+            if (stat("/", &st) == 0 && st.st_dev == dev)
+                topdir[1] = '\0';
+            break;
+        }
+        *slash = '\0';
+        if (stat(topdir, &st) != 0)
+            return false;
+        if (st.st_dev != dev)
+        {
+            *slash = '/';
+            break;
+        }
+    }
+    const char* sep = strcmp(topdir, "/") == 0 ? "" : "/";
+
+    // $topdir/.Trash/$uid, but only if an admin created $topdir/.Trash as a real folder with the sticky bit set
+    snprintf(trash, PATH_MAX, "%s%s.Trash", topdir, sep);
+    if (lstat(trash, &st) == 0 && S_ISDIR(st.st_mode) && (st.st_mode & S_ISVTX))
+    {
+        snprintf(trash, PATH_MAX, "%s%s.Trash/%u", topdir, sep, (unsigned)getuid());
+        if (_xfiles_mkdir_private(trash) && lstat(trash, &st) == 0 && S_ISDIR(st.st_mode) && st.st_uid == getuid())
+            return true;
+    }
+
+    // $topdir/.Trash-$uid
+    snprintf(trash, PATH_MAX, "%s%s.Trash-%u", topdir, sep, (unsigned)getuid());
+    return _xfiles_mkdir_private(trash) && lstat(trash, &st) == 0 && S_ISDIR(st.st_mode) && st.st_uid == getuid();
+}
+
+// Moves the file to the freedesktop.org Trash, so the file manager can show it and put it back
+// https://specifications.freedesktop.org/trash-spec/latest/
+bool xfiles_trash(const char* path)
+{
+    char        abspath[PATH_MAX];
+    char        trash[PATH_MAX];
+    char        topdir[PATH_MAX];
+    struct stat st;
+
+    if (!_xfiles_absolute_path(path, abspath) || lstat(abspath, &st) != 0)
+        return false;
+    if (!_xfiles_find_trash(abspath, st.st_dev, trash, topdir))
+        return false;
+
+    char files_dir[PATH_MAX];
+    char info_dir[PATH_MAX];
+    snprintf(files_dir, sizeof(files_dir), "%s/files", trash);
+    snprintf(info_dir, sizeof(info_dir), "%s/info", trash);
+    if (!_xfiles_mkdir_private(files_dir) || !_xfiles_mkdir_private(info_dir))
+        return false;
+
+    // Path= is relative to the mount point for trashes on other devices, so it still works if it's mounted elsewhere
+    const char* original = abspath;
+    if (topdir[0])
+        original += strcmp(topdir, "/") == 0 ? 1 : strlen(topdir) + 1;
+
+    char info[PATH_MAX * 3 + 128];
+    int  infolen = snprintf(info, sizeof(info), "[Trash Info]\nPath=");
+    if (!_xfiles_uri_encode(original, info + infolen, sizeof(info) - infolen))
+        return false;
+    infolen += strlen(info + infolen);
+    {
+        time_t    now = time(NULL);
+        struct tm tm;
+        localtime_r(&now, &tm);
+        infolen += strftime(info + infolen, sizeof(info) - infolen, "\nDeletionDate=%Y-%m-%dT%H:%M:%S\n", &tm);
+    }
+
+    // On a name collision try "name.2", "name.3", etc. Creating the .trashinfo file with O_EXCL reserves the name
+    const char* name = xfiles_get_name(abspath);
+    for (int i = 1; i < 1000; i++)
+    {
+        char trashname[NAME_MAX + 16];
+        char info_path[PATH_MAX];
+        char dest[PATH_MAX];
+        if (i == 1)
+            snprintf(trashname, sizeof(trashname), "%s", name);
+        else
+            snprintf(trashname, sizeof(trashname), "%s.%d", name, i);
+        if (snprintf(info_path, sizeof(info_path), "%s/%s.trashinfo", info_dir, trashname) >= (int)sizeof(info_path))
+            return false;
+        if (snprintf(dest, sizeof(dest), "%s/%s", files_dir, trashname) >= (int)sizeof(dest))
+            return false;
+
+        int fd = open(info_path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+        if (fd == -1)
+        {
+            if (errno == EEXIST)
+                continue;
+            return false;
+        }
+        bool written = write(fd, info, infolen) == infolen;
+        close(fd);
+
+        if (written && xfiles_move(abspath, dest, XFILES_MOVE_DEFAULT))
+            return true;
+
+        int err = errno;
+        unlink(info_path);
+        if (!written || err != EEXIST)
+            return false;
+    }
+    return false;
+}
+
+// Runs a program and waits for it to exit. Returns true if it exited with 0
+static bool _xfiles_run(char* const argv[])
+{
+    // posix_spawn rather than fork, which is safer in a multithreaded host and doesn't copy its page tables
+    // https://man7.org/linux/man-pages/man3/posix_spawn.3.html
+    pid_t                      pid;
+    posix_spawn_file_actions_t actions;
+    posix_spawn_file_actions_init(&actions);
+    posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, "/dev/null", O_WRONLY, 0);
+    int err = posix_spawnp(&pid, argv[0], &actions, NULL, argv, environ);
+    posix_spawn_file_actions_destroy(&actions);
+    if (err != 0)
+        return false;
+
+    int status = 0;
+    while (waitpid(pid, &status, 0) == -1)
+        if (errno != EINTR)
+            return false;
+    return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+}
+
+bool xfiles_open_file_explorer(const char* path)
+{
+    // Some xdg-open backends wait for the app they open to exit, so run it in the background with sh. sh exits as soon
+    // as xdg-open has started, and xdg-open is reparented to init so it doesn't become a zombie of the host
+    char* argv[] = {
+        (char*)"sh",
+        (char*)"-c",
+        (char*)"command -v xdg-open >/dev/null && { xdg-open \"$1\" >/dev/null 2>&1 & }",
+        (char*)"sh",
+        (char*)path,
+        NULL};
+    bool ok = _xfiles_run(argv);
+    XFILES_ASSERT(ok);
+    return ok;
+}
+
+bool xfiles_select_in_file_explorer(const char* path)
+{
+    // Most file managers (Nautilus, Dolphin, Nemo, Caja, Thunar, ...) implement org.freedesktop.FileManager1
+    // https://www.freedesktop.org/wiki/Specifications/file-manager-interface/
+    char abspath[PATH_MAX];
+    char arg[PATH_MAX * 3 + 32];
+    if (!_xfiles_absolute_path(path, abspath))
+        return false;
+
+    int n = snprintf(arg, sizeof(arg), "array:string:file://");
+    if (_xfiles_uri_encode(abspath, arg + n, sizeof(arg) - n))
+    {
+        char* argv[] = {
+            (char*)"dbus-send",
+            (char*)"--session",
+            (char*)"--print-reply", // Waits for the reply, so the exit code tells us if it worked
+            (char*)"--reply-timeout=5000",
+            (char*)"--dest=org.freedesktop.FileManager1",
+            (char*)"/org/freedesktop/FileManager1",
+            (char*)"org.freedesktop.FileManager1.ShowItems",
+            arg,
+            (char*)"string:",
+            NULL};
+        if (_xfiles_run(argv))
+            return true;
+    }
+
+    // No file manager implements the interface, or dbus-send isn't installed. Open the parent folder instead
+    *strrchr(abspath, '/') = '\0';
+    return xfiles_open_file_explorer(abspath[0] ? abspath : "/");
+}
+
+// Reads the value of 'key' from user-dirs.dirs, eg. XDG_DESKTOP_DIR="$HOME/Desktop"
+// Returns the length of the value written to 'out', or 0 if it wasn't found
+// https://www.freedesktop.org/wiki/Software/xdg-user-dirs/
+static int _xfiles_read_user_dir(
+    const char* config_dir,
+    const char* key,
+    const char* home,
+    size_t      homelen,
+    char*       out,
+    size_t      outlen)
+{
+    char path[PATH_MAX];
+    char buf[4096];
+    snprintf(path, sizeof(path), "%s/user-dirs.dirs", config_dir);
+
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd == -1)
+        return 0;
+    ssize_t nread = read(fd, buf, sizeof(buf) - 1);
+    close(fd);
+    if (nread <= 0)
+        return 0;
+    buf[nread] = '\0';
+
+    size_t keylen = strlen(key);
+    for (char* line = buf; line; line = strchr(line, '\n'))
+    {
+        while (*line == '\n' || *line == ' ' || *line == '\t')
+            line++;
+        if (strncmp(line, key, keylen) != 0 || line[keylen] != '=' || line[keylen + 1] != '"')
+            continue;
+
+        // Values are either "$HOME/..." or an absolute path. Characters may be escaped with '\'
+        const char* c = line + keylen + 2;
+        size_t      n = 0;
+        if (strncmp(c, "$HOME", 5) == 0)
+        {
+            if (homelen >= outlen)
+                return 0;
+            memcpy(out, home, homelen);
+            n  = homelen;
+            c += 5;
+        }
+        else if (*c != '/')
+        {
+            return 0;
+        }
+        for (; *c && *c != '"' && *c != '\n'; c++)
+        {
+            if (*c == '\\' && c[1])
+                c++;
+            if (n + 1 >= outlen)
+                return 0;
+            out[n++] = *c;
+        }
+        out[n] = '\0';
+        return (int)n;
+    }
+    return 0;
+}
+
+int xfiles_get_user_directory(char* out, size_t outlen, XFilesUserDirectory loc)
+{
+    // Keys in user-dirs.dirs, and the defaults when they're missing
+    static const char* XDG_KEYS[] = {
+        NULL,                // XFILES_USER_DIRECTORY_HOME
+        NULL,                // XFILES_USER_DIRECTORY_APPDATA
+        "XDG_DESKTOP_DIR",   // XFILES_USER_DIRECTORY_DESKTOP
+        "XDG_DOCUMENTS_DIR", // XFILES_USER_DIRECTORY_DOCUMENTS
+        "XDG_DOWNLOAD_DIR",  // XFILES_USER_DIRECTORY_DOWNLOADS
+        "XDG_MUSIC_DIR",     // XFILES_USER_DIRECTORY_MUSIC
+        "XDG_PICTURES_DIR",  // XFILES_USER_DIRECTORY_PICTURES
+        "XDG_VIDEOS_DIR",    // XFILES_USER_DIRECTORY_VIDEOS
+    };
+    static const char* PATHS[] = {
+        "",           // XFILES_USER_DIRECTORY_HOME
+        "/.config",   // XFILES_USER_DIRECTORY_APPDATA
+        "/Desktop",   // XFILES_USER_DIRECTORY_DESKTOP
+        "/Documents", // XFILES_USER_DIRECTORY_DOCUMENTS
+        "/Downloads", // XFILES_USER_DIRECTORY_DOWNLOADS
+        "/Music",     // XFILES_USER_DIRECTORY_MUSIC
+        "/Pictures",  // XFILES_USER_DIRECTORY_PICTURES
+        "/Videos",    // XFILES_USER_DIRECTORY_VIDEOS
+    };
+    _Static_assert(XFILES_ARRLEN(XDG_KEYS) == XFILES_USER_DIRECTORY_COUNT, "");
+    _Static_assert(XFILES_ARRLEN(PATHS) == XFILES_USER_DIRECTORY_COUNT, "");
+
+    if (loc < 0)
+        loc = (XFilesUserDirectory)0;
+    if (loc >= XFILES_USER_DIRECTORY_COUNT)
+        loc = (XFilesUserDirectory)(XFILES_USER_DIRECTORY_COUNT - 1);
+
+    // $HOME, or the password database if it isn't set
+    char        pwbuf[4096];
+    const char* home = getenv("HOME");
+    if (home == NULL || home[0] != '/')
+    {
+        struct passwd  pw;
+        struct passwd* result = NULL;
+        if (getpwuid_r(getuid(), &pw, pwbuf, sizeof(pwbuf), &result) != 0 || result == NULL)
+            return 0;
+        home = pw.pw_dir;
+    }
+    size_t homelen = strlen(home);
+
+    // $XDG_CONFIG_HOME, default ~/.config
+    char        config_dir[PATH_MAX];
+    const char* xdg_config = getenv("XDG_CONFIG_HOME");
+    if (xdg_config && xdg_config[0] == '/')
+        snprintf(config_dir, sizeof(config_dir), "%s", xdg_config);
+    else
+        snprintf(config_dir, sizeof(config_dir), "%s/.config", home);
+
+    int num = 0;
+    if (loc == XFILES_USER_DIRECTORY_APPDATA)
+        num = _xfiles_concat(out, outlen, config_dir, strlen(config_dir), "", 0);
+    else if (XDG_KEYS[loc])
+        num = _xfiles_read_user_dir(config_dir, XDG_KEYS[loc], home, homelen, out, outlen);
+    if (num == 0)
+        num = _xfiles_concat(out, outlen, home, homelen, PATHS[loc], strlen(PATHS[loc]));
+
+    XFILES_ASSERT(num > 0);
+    return num;
+}
+
+// File watching using inotify
+//
+// inotify only watches a single folder, so each folder in the tree gets its own watch. 'dirs' maps watch descriptors
+// to folders. Each folder stores its parent and its own name, so renaming a folder only changes one entry, and paths
+// are rebuilt by walking up to the root. Names are stored in 'names'. Removing or renaming a folder leaves its old name
+// behind as garbage, which is compacted when 'names' would otherwise grow.
+//
+// New folders are scanned after they're watched, and anything already inside them is reported as CREATED. Without this
+// we'd miss files created before the watch was added, eg. 'mkdir -p a/b/c' or extracting an archive. This can cause
+// duplicate CREATED events.
+//
+// Renames and moves:
+// The kernel sends IN_MOVED_FROM for the old path and IN_MOVED_TO for the new path, with matching cookies. When a
+// watched folder is moved, its watch follows it, so we remember the folder from IN_MOVED_FROM and update its parent and
+// name on the matching IN_MOVED_TO. If the IN_MOVED_TO never arrives, the folder was moved out of the tree, so its
+// watches are removed.
+#define XFILES_WATCH_MASK                                                                                              \
+    (IN_CREATE | IN_DELETE | IN_MOVED_FROM | IN_MOVED_TO | IN_CLOSE_WRITE | IN_DELETE_SELF | IN_MOVE_SELF |            \
+     IN_ONLYDIR | IN_DONT_FOLLOW)
+
+typedef struct XFilesWatchDir
+{
+    int      wd;       // -1 for a free slot
+    int      parent;   // Index of the parent folder, -1 for the root. For a free slot, the next free slot
+    uint32_t name_off; // Offset into 'names'. The root's name is the full path to the watched folder
+    uint32_t name_len;
+} XFilesWatchDir;
+
+struct XFilesWatchContext
+{
+    int fd;
+
+    // dirs[0] is always the root
+    XFilesWatchDir* dirs;
+    int             num_dirs;
+    int             cap_dirs;
+    int             free_dir; // Head of the free list, -1 if empty
+
+    char*    names;
+    uint32_t names_len;
+    uint32_t names_cap;
+
+    // A folder was moved from somewhere in the tree, and we're waiting to see where it went
+    uint32_t moved_cookie; // 0 if none
+    int      moved_dir;    // -1 if the folder wasn't watched
+
+    void*               udata;
+    XFilesWatchCallback callback;
+
+    // Large enough for ~1000 events with short names. read() returns as many whole events as fit
+    char buf[1024 * 64] __attribute__((aligned(__alignof__(struct inotify_event))));
+};
+
+static void _xfiles_watch_send(struct XFilesWatchContext* ctx, enum XFilesWatchType type, const char* path, bool is_dir)
+{
+    XFilesWatchEvent event;
+    event.type   = type;
+    event.path   = path;
+    event.is_dir = is_dir;
+    ctx->callback(&event, ctx->udata);
+}
+
+static size_t _xfiles_watch_dir_path(const struct XFilesWatchContext* ctx, int idx, char* out, size_t outlen);
+
+static void _xfiles_watch_send_overflow(struct XFilesWatchContext* ctx)
+{
+    char root[PATH_MAX];
+    if (_xfiles_watch_dir_path(ctx, 0, root, sizeof(root)))
+        _xfiles_watch_send(ctx, XFILES_WATCH_OVERFLOW, root, true);
+}
+
+// Linear search. Events for the same folder tend to arrive together, but if this shows up in a profile with very large
+// trees, try caching the last result or a hash map
+static int _xfiles_watch_find_wd(const struct XFilesWatchContext* ctx, int wd)
+{
+    for (int i = 0; i < ctx->num_dirs; i++)
+        if (ctx->dirs[i].wd == wd)
+            return i;
+    return -1;
+}
+
+static int _xfiles_watch_find_child(const struct XFilesWatchContext* ctx, int parent, const char* name)
+{
+    size_t namelen = strlen(name);
+    for (int i = 0; i < ctx->num_dirs; i++)
+    {
+        const XFilesWatchDir* d = &ctx->dirs[i];
+        if (d->wd >= 0 && d->parent == parent && d->name_len == namelen &&
+            memcmp(ctx->names + d->name_off, name, namelen) == 0)
+            return i;
+    }
+    return -1;
+}
+
+// Returns false if out of memory
+static bool _xfiles_watch_set_name(struct XFilesWatchContext* ctx, int idx, const char* name, size_t namelen)
+{
+    if (ctx->names_len + namelen > ctx->names_cap)
+    {
+        // Count the names still in use. If at least half of 'names' is garbage, compact it instead of growing it
+        uint32_t live = 0;
+        for (int i = 0; i < ctx->num_dirs; i++)
+            if (i != idx && (i == 0 || ctx->dirs[i].wd >= 0))
+                live += ctx->dirs[i].name_len;
+
+        uint32_t cap = ctx->names_cap ? ctx->names_cap : 4096;
+        while (cap < 2 * (live + namelen))
+            cap *= 2;
+
+        char* names = (char*)XFILES_MALLOC(cap);
+        XFILES_ASSERT(names != NULL);
+        if (names == NULL)
+            return false;
+
+        uint32_t len = 0;
+        for (int i = 0; i < ctx->num_dirs; i++)
+        {
+            XFilesWatchDir* d = &ctx->dirs[i];
+            if (i != idx && (i == 0 || d->wd >= 0))
+            {
+                memcpy(names + len, ctx->names + d->name_off, d->name_len);
+                d->name_off  = len;
+                len         += d->name_len;
+            }
+        }
+        XFILES_FREE(ctx->names);
+        ctx->names     = names;
+        ctx->names_len = len;
+        ctx->names_cap = cap;
+    }
+
+    memcpy(ctx->names + ctx->names_len, name, namelen);
+    ctx->dirs[idx].name_off  = ctx->names_len;
+    ctx->dirs[idx].name_len  = (uint32_t)namelen;
+    ctx->names_len          += (uint32_t)namelen;
+    return true;
+}
+
+// Returns the length of the path, or 0 if it doesn't fit in 'out'
+static size_t _xfiles_watch_dir_path(const struct XFilesWatchContext* ctx, int idx, char* out, size_t outlen)
+{
+    size_t len = 0;
+    for (int i = idx; i != -1; i = ctx->dirs[i].parent)
+        len += ctx->dirs[i].name_len + (ctx->dirs[i].parent != -1);
+    if (len >= outlen)
+        return 0;
+
+    // Fill in backwards, from the folder up to the root
+    size_t end = len;
+    out[end]   = '\0';
+    for (int i = idx; i != -1; i = ctx->dirs[i].parent)
+    {
+        end -= ctx->dirs[i].name_len;
+        memcpy(out + end, ctx->names + ctx->dirs[i].name_off, ctx->dirs[i].name_len);
+        if (ctx->dirs[i].parent != -1)
+            out[--end] = '/';
+    }
+    return len;
+}
+
+// Stops watching a folder and everything below it
+static void _xfiles_watch_remove_tree(struct XFilesWatchContext* ctx, int idx)
+{
+    // Two passes, because finding descendants walks up through 'parent', which a freed slot reuses. Folders being
+    // removed are marked with wd = -2 in the first pass
+    for (int i = 0; i < ctx->num_dirs; i++)
+    {
+        if (ctx->dirs[i].wd < 0)
+            continue;
+        int p = i;
+        while (p != -1 && p != idx)
+            p = ctx->dirs[p].parent;
+        if (p == idx)
+        {
+            // Fails harmlessly if the kernel already removed the watch, eg. the folder was deleted
+            inotify_rm_watch(ctx->fd, ctx->dirs[i].wd);
+            ctx->dirs[i].wd = -2;
+        }
+    }
+    for (int i = 0; i < ctx->num_dirs; i++)
+    {
+        if (ctx->dirs[i].wd != -2)
+            continue;
+        ctx->dirs[i].wd = -1;
+        // The root slot is never reused, so its path stays valid for OVERFLOW events
+        if (i != 0)
+        {
+            ctx->dirs[i].parent = ctx->free_dir;
+            ctx->free_dir       = i;
+        }
+    }
+    if (ctx->moved_dir != -1 && ctx->dirs[ctx->moved_dir].wd < 0)
+        ctx->moved_dir = -1;
+}
+
+// Watches the folder at 'path' and everything below it. 'path' must be a PATH_MAX sized buffer, which is used for the
+// paths of children. If 'send_children' is true, sends CREATED for everything found inside
+static void _xfiles_watch_add_tree(
+    struct XFilesWatchContext* ctx,
+    char*                      path,
+    size_t                     pathlen,
+    int                        parent,
+    const char*                name,
+    size_t                     namelen,
+    bool                       send_children)
+{
+    // https://man7.org/linux/man-pages/man2/inotify_add_watch.2.html
+    int wd = inotify_add_watch(ctx->fd, path, XFILES_WATCH_MASK);
+    // ENOENT: deleted before we got to it. ENOTDIR: replaced by a file. EACCES: no permission. ENOSPC: hit the
+    // max_user_watches limit in /proc/sys/fs/inotify
+    XFILES_ASSERT(wd != -1 || errno == ENOENT || errno == ENOTDIR || errno == EACCES);
+    if (wd == -1)
+        return;
+    // Already watching it, through a bind mount
+    if (_xfiles_watch_find_wd(ctx, wd) != -1)
+        return;
+
+    int idx = ctx->free_dir;
+    if (idx != -1)
+    {
+        ctx->free_dir = ctx->dirs[idx].parent;
+    }
+    else
+    {
+        if (ctx->num_dirs == ctx->cap_dirs)
+        {
+            int             cap  = ctx->cap_dirs ? ctx->cap_dirs * 2 : 64;
+            XFilesWatchDir* dirs = (XFilesWatchDir*)XFILES_REALLOC(ctx->dirs, cap * sizeof(*dirs));
+            XFILES_ASSERT(dirs != NULL);
+            if (dirs == NULL)
+            {
+                inotify_rm_watch(ctx->fd, wd);
+                return;
+            }
+            ctx->dirs     = dirs;
+            ctx->cap_dirs = cap;
+        }
+        idx = ctx->num_dirs++;
+    }
+    ctx->dirs[idx].wd     = wd;
+    ctx->dirs[idx].parent = parent;
+    if (!_xfiles_watch_set_name(ctx, idx, name, namelen))
+    {
+        _xfiles_watch_remove_tree(ctx, idx);
+        return;
+    }
+
+    DIR* dir = opendir(path);
+    if (dir == NULL)
+        return;
+
+    struct dirent* entry;
+    while ((entry = readdir(dir)) != NULL)
+    {
+        const char* child    = entry->d_name;
+        size_t      childlen = strlen(child);
+        if (strcmp(child, ".") == 0 || strcmp(child, "..") == 0)
+            continue;
+
+        bool is_dir = entry->d_type == DT_DIR;
+        if (entry->d_type == DT_UNKNOWN)
+        {
+            struct stat st;
+            is_dir = fstatat(dirfd(dir), child, &st, AT_SYMLINK_NOFOLLOW) == 0 && S_ISDIR(st.st_mode);
+        }
+        if (!is_dir && !send_children)
+            continue;
+        if (pathlen + 1 + childlen >= PATH_MAX)
+            continue;
+
+        path[pathlen] = '/';
+        memcpy(path + pathlen + 1, child, childlen + 1);
+        if (send_children)
+            _xfiles_watch_send(ctx, XFILES_WATCH_CREATED, path, is_dir);
+        if (is_dir)
+            _xfiles_watch_add_tree(ctx, path, pathlen + 1 + childlen, idx, child, childlen, send_children);
+        path[pathlen] = '\0';
+    }
+    closedir(dir);
+}
+
+XFilesWatchContext* xfiles_watch_create(const char* path, void* udata, XFilesWatchCallback cb)
+{
+    XFILES_ASSERT(path != NULL); // What path should be watched?
+    XFILES_ASSERT(cb != NULL);   // Did you forget to write a callback?
+
+    struct XFilesWatchContext* ctx = (struct XFilesWatchContext*)XFILES_MALLOC(sizeof(*ctx));
+    if (ctx == NULL)
+        return NULL;
+    memset(ctx, 0, sizeof(*ctx));
+    ctx->free_dir  = -1;
+    ctx->moved_dir = -1;
+    ctx->udata     = udata;
+    ctx->callback  = cb;
+
+    // Non blocking, so flush can read until the queue is empty
+    // https://man7.org/linux/man-pages/man2/inotify_init1.2.html
+    ctx->fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+    XFILES_ASSERT(ctx->fd != -1);
+    if (ctx->fd == -1)
+    {
+        XFILES_FREE(ctx);
+        return NULL;
+    }
+
+    char   root[PATH_MAX];
+    size_t rootlen = snprintf(root, sizeof(root), "%s", path);
+    while (rootlen > 1 && root[rootlen - 1] == '/')
+        root[--rootlen] = '\0';
+
+    if (rootlen < sizeof(root))
+        _xfiles_watch_add_tree(ctx, root, rootlen, -1, root, rootlen, false);
+    if (ctx->num_dirs == 0 || ctx->dirs[0].wd < 0)
+    {
+        xfiles_watch_destroy(ctx);
+        return NULL;
+    }
+    return ctx;
+}
+
+// Called when we know a folder from IN_MOVED_FROM won't get a matching IN_MOVED_TO
+static void _xfiles_watch_resolve_move(struct XFilesWatchContext* ctx)
+{
+    if (ctx->moved_dir != -1)
+        _xfiles_watch_remove_tree(ctx, ctx->moved_dir);
+    ctx->moved_dir    = -1;
+    ctx->moved_cookie = 0;
+}
+
+static void _xfiles_watch_handle(struct XFilesWatchContext* ctx, const struct inotify_event* ev)
+{
+    // https://man7.org/linux/man-pages/man7/inotify.7.html
+    if (ev->mask & IN_Q_OVERFLOW)
+    {
+        _xfiles_watch_resolve_move(ctx);
+        _xfiles_watch_send_overflow(ctx);
+        return;
+    }
+
+    bool moved_within = (ev->mask & IN_MOVED_TO) && ctx->moved_cookie != 0 && ctx->moved_cookie == ev->cookie;
+    if (!moved_within)
+        _xfiles_watch_resolve_move(ctx);
+
+    int idx = _xfiles_watch_find_wd(ctx, ev->wd);
+    if (idx == -1)
+        return;
+
+    // The watch was removed because the folder was deleted, moved out of the tree, or its filesystem was unmounted
+    if (ev->mask & IN_IGNORED)
+    {
+        _xfiles_watch_remove_tree(ctx, idx);
+        return;
+    }
+    // The root itself was moved or deleted
+    if (ev->mask & (IN_DELETE_SELF | IN_MOVE_SELF))
+    {
+        if (idx == 0)
+            _xfiles_watch_send_overflow(ctx);
+        return;
+    }
+    if (ev->len == 0)
+        return;
+
+    char   path[PATH_MAX];
+    size_t dirlen  = _xfiles_watch_dir_path(ctx, idx, path, sizeof(path));
+    size_t namelen = strlen(ev->name);
+    if (dirlen == 0 || dirlen + 1 + namelen >= sizeof(path))
+        return;
+    path[dirlen] = '/';
+    memcpy(path + dirlen + 1, ev->name, namelen + 1);
+    size_t pathlen = dirlen + 1 + namelen;
+    bool   is_dir  = (ev->mask & IN_ISDIR) != 0;
+
+    if (ev->mask & IN_CREATE)
+    {
+        _xfiles_watch_send(ctx, XFILES_WATCH_CREATED, path, is_dir);
+        if (is_dir)
+            _xfiles_watch_add_tree(ctx, path, pathlen, idx, ev->name, namelen, true);
+    }
+    else if (ev->mask & IN_MOVED_TO)
+    {
+        _xfiles_watch_send(ctx, XFILES_WATCH_CREATED, path, is_dir);
+        if (is_dir && moved_within && ctx->moved_dir != -1)
+        {
+            // Renamed or moved within the tree. Its watches came with it
+            ctx->dirs[ctx->moved_dir].parent = idx;
+            if (!_xfiles_watch_set_name(ctx, ctx->moved_dir, ev->name, namelen))
+                _xfiles_watch_remove_tree(ctx, ctx->moved_dir);
+        }
+        else if (is_dir)
+        {
+            // Moved in from outside the tree. Or moved within the tree before we got to watch it, eg. 'mkdir a && mv a
+            // b && touch b/c', in which case nothing inside has been reported yet
+            _xfiles_watch_add_tree(ctx, path, pathlen, idx, ev->name, namelen, moved_within);
+        }
+        ctx->moved_dir    = -1;
+        ctx->moved_cookie = 0;
+    }
+    else if (ev->mask & IN_MOVED_FROM)
+    {
+        if (is_dir)
+        {
+            ctx->moved_dir    = _xfiles_watch_find_child(ctx, idx, ev->name);
+            ctx->moved_cookie = ev->cookie;
+        }
+        _xfiles_watch_send(ctx, XFILES_WATCH_DELETED, path, is_dir);
+    }
+    else if (ev->mask & IN_DELETE)
+    {
+        // The folder's own watch gets IN_IGNORED, which removes it
+        _xfiles_watch_send(ctx, XFILES_WATCH_DELETED, path, is_dir);
+    }
+    else if (ev->mask & IN_CLOSE_WRITE)
+    {
+        // A file opened for writing was closed. Unlike IN_MODIFY this fires once per save rather than once per
+        // write(), and the file is no longer half written. It misses writes through mmap and files that are kept open
+        _xfiles_watch_send(ctx, XFILES_WATCH_MODIFIED, path, false);
+    }
+}
+
+void xfiles_watch_flush(XFilesWatchContext* _ctx)
+{
+    XFILES_ASSERT(_ctx != NULL);
+    struct XFilesWatchContext* ctx = (struct XFilesWatchContext*)_ctx;
+
+    for (;;)
+    {
+        // -1 with EAGAIN when the queue is empty
+        ssize_t nread = read(ctx->fd, ctx->buf, sizeof(ctx->buf));
+        if (nread <= 0)
+            break;
+
+        // Writing a new file arrives as IN_CREATE followed by IN_CLOSE_WRITE. Skip the IN_CLOSE_WRITE so it's only
+        // reported as CREATED. If the two arrive in different reads you'll get CREATED then MODIFIED
+        const struct inotify_event* last_created = NULL;
+        for (ssize_t off = 0; off < nread;)
+        {
+            const struct inotify_event* ev  = (const struct inotify_event*)(ctx->buf + off);
+            off                            += sizeof(*ev) + ev->len;
+
+            bool skip = (ev->mask & IN_CLOSE_WRITE) && last_created && last_created->wd == ev->wd &&
+                        strcmp(last_created->name, ev->name) == 0;
+            if (!skip)
+                _xfiles_watch_handle(ctx, ev);
+            last_created = (ev->mask & IN_CREATE) ? ev : NULL;
+        }
+    }
+
+    // The kernel queues IN_MOVED_FROM and IN_MOVED_TO together, so by now we've seen both if there was going to be one
+    _xfiles_watch_resolve_move(ctx);
+}
+
+void xfiles_watch_destroy(XFilesWatchContext* _ctx)
+{
+    XFILES_ASSERT(_ctx != NULL);
+    struct XFilesWatchContext* ctx = (struct XFilesWatchContext*)_ctx;
+    // Closing the inotify instance removes all of its watches
+    if (ctx->fd != -1)
+        close(ctx->fd);
+    XFILES_FREE(ctx->dirs);
+    XFILES_FREE(ctx->names);
+    XFILES_FREE(ctx);
+}
+
+#endif // __linux__
 
 void xfiles_free(void* data) { XFILES_FREE(data); }
 
