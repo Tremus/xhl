@@ -55,20 +55,27 @@ typedef struct XSystemInfo
     XSystemString model_name; // eg. MacBookAir10,1
 
     XSystemString cpu_name;
-    uint64_t      num_cores;
 
+    // CPUs with hybrid cores (eg. Intel P & E cores, Apple Silicon) have multiple perf levels. Other CPUs have 1
+    // Levels are ordered fastest first, so index 0 is always the highest performance cores (eg. P cores)
+    // Physical cores count each core once. Logical cores count each hardware thread (eg. Hyper-Threading / SMT)
+    // A physical count of 0 means it couldn't be detected
+    // Use xsys_num_physical_cores() & xsys_num_logical_cores() for totals
     uint64_t num_core_perf_levels;
-    uint64_t num_cores_for_perf_level[8];
+    uint64_t num_physical_cores_for_perf_level[8];
+    uint64_t num_logical_cores_for_perf_level[8];
 
     int64_t ram_max_bytes;
     int64_t ram_used_bytes; // last known value
-                            // used to quickly diagnose problems for when a user asks:
-                            //     "why does this program crash immediately?"
-                            // then after several back and forths you find out they are using 98% of their 8gigs of
-                            // RAM and keep loads of chrome tabs open
+    // used to quickly diagnose problems for when a user asks:
+    //     "why does this program crash immediately?"
+    // then after several back and forths you find out they're using 98% of their 8gigs of RAM due to chrome tabs
 
-    int num_gpus;
-    int default_gpu_idx;
+    // TRUE if any GPUs were found. FALSE if the system was checked and definitely has none (eg. a headless server)
+    // UNKNOWN if GPUs couldn't be checked (eg. WSL2, which hides them behind a virtual adapter)
+    XSystemInfoBool has_gpu;
+    int             num_gpus;
+    int             default_gpu_idx;
     struct XGPUInfo
     {
         XSystemString   name;
@@ -110,12 +117,17 @@ extern XSystemInfo g_xsysinfo;
 void xsys_init(XSystemInfo* info); // Expect this to take 1.5-20ms on Windows, with 1.5ms being the average case
 void xsys_print(XSystemInfo* info);
 
+// Sums of all perf levels
+uint64_t xsys_num_physical_cores(const XSystemInfo* info);
+uint64_t xsys_num_logical_cores(const XSystemInfo* info);
+
 #endif // XHL_SYSTEM_H
 
 #ifdef XHL_SYSTEM_IMPL
 #undef XHL_SYSTEM_IMPL
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -137,6 +149,55 @@ const char* _sysbool_to_string[] = {"Unkown", "True", "False"};
 #define XSYS_ARRLEN(arr) (sizeof(arr) / sizeof(arr[0]))
 
 XSystemInfo g_xsysinfo = {0};
+
+#if defined(_WIN32) || defined(__linux__)
+// Returns the perf level index for 'key', where a higher key means faster cores. Adds a new level if 'key' hasn't been
+// seen before, keeping levels sorted fastest first. 'level_keys' holds the key of each existing level
+static int xsys_get_perf_level(XSystemInfo* info, int64_t* level_keys, int64_t key)
+{
+    const int N = (int)info->num_core_perf_levels;
+    int       i = 0;
+    for (; i < N; i++)
+    {
+        if (level_keys[i] == key)
+            return i;
+        if (level_keys[i] < key)
+            break;
+    }
+    if (N == (int)XSYS_ARRLEN(info->num_logical_cores_for_perf_level))
+        return N - 1; // Out of space. Lump the rest in with the slowest level
+
+    const size_t num_moved = N - i;
+    memmove(level_keys + i + 1, level_keys + i, num_moved * sizeof(*level_keys));
+    memmove(
+        info->num_physical_cores_for_perf_level + i + 1,
+        info->num_physical_cores_for_perf_level + i,
+        num_moved * sizeof(uint64_t));
+    memmove(
+        info->num_logical_cores_for_perf_level + i + 1,
+        info->num_logical_cores_for_perf_level + i,
+        num_moved * sizeof(uint64_t));
+    level_keys[i]                              = key;
+    info->num_physical_cores_for_perf_level[i] = 0;
+    info->num_logical_cores_for_perf_level[i]  = 0;
+    info->num_core_perf_levels++;
+    return i;
+}
+
+// Some Intel CPU brand strings are prefixed with spaces
+// https://www.dungeon-master.com/forum/viewtopic.php?t=29636
+static void xsys_trim_leading_spaces(XSystemString* str)
+{
+    char* p = str->buffer;
+    while (*p == ' ')
+        p++;
+    if (p > str->buffer)
+    {
+        ptrdiff_t diff = p - str->buffer;
+        memmove(str->buffer, p, sizeof(str->buffer) - diff);
+    }
+}
+#endif
 
 #ifdef _WIN32
 
@@ -445,6 +506,10 @@ void xsys_get_gpus_DXGI(XSystemInfo* info)
 
     DXGI_ADAPTER_DESC old_desc;
 
+    // Used to tell "no GPU" apart from "couldn't check"
+    UINT NumHardwareAdapters = 0;
+    UINT NumFailedAdapters   = 0;
+
     struct XSystemQueriedAdapterArray QueriedAdapters;
     _STATIC_ASSERT(ARRAYSIZE(QueriedAdapters.Adapters) >= ARRAYSIZE(info->gpus));
 
@@ -470,13 +535,15 @@ void xsys_get_gpus_DXGI(XSystemInfo* info)
             break; // end of enumeration
         AdapterIndex++;
 
-        if (FAILED(hr))
+        if (FAILED(hr) || FAILED(pAdapter1->lpVtbl->GetDesc1(pAdapter1, &desc)))
+        {
+            NumFailedAdapters++;
             continue;
-        if (FAILED(pAdapter1->lpVtbl->GetDesc1(pAdapter1, &desc)))
-            continue;
+        }
         // Skip "Microsoft Basic Render Driver" and similar
         if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)
             continue;
+        NumHardwareAdapters++;
 
         // Unfortunately Windows don't do a good job at removing duplucates from
         // IDXGIFactory1::EnumAdapters1 Identify adapter and test for duplicates
@@ -519,6 +586,10 @@ void xsys_get_gpus_DXGI(XSystemInfo* info)
         }
     }
     xsys_assert(pAdapter1 == NULL);
+
+    // Every adapter was checked, and they were all software renderers
+    if (pFactory2 && NumHardwareAdapters == 0 && NumFailedAdapters == 0)
+        info->has_gpu = XSYSTEM_INFO_BOOL_FALSE;
 
     if (pFactory2)
         pFactory2->lpVtbl->Release(pFactory2);
@@ -718,20 +789,12 @@ void xsys_init(XSystemInfo* info)
         // memmove(info->cpu_name.buffer + 8, info->cpu_name.buffer, 48);
         // memset(info->cpu_name.buffer, ' ', 8);
 
-        // NOTE: some Intel CPU are prefixed with spaces
-        // https://www.dungeon-master.com/forum/viewtopic.php?t=29636
-        char* p = info->cpu_name.buffer;
-        while (*p == ' ')
-            p++;
-        if (p > info->cpu_name.buffer)
-        {
-            ptrdiff_t diff = p - info->cpu_name.buffer;
-            memmove(info->cpu_name.buffer, p, sizeof(info->cpu_name) - diff);
-        }
+        xsys_trim_leading_spaces(&info->cpu_name);
 
-        // Get E & P cores
+        // Get physical & logical cores for each perf level (eg. P & E cores)
         {
-            char  buffer[2048];
+            // Each entry is ~48 bytes, so this fits ~170 physical cores
+            char  buffer[8192];
             DWORD bufferSize = sizeof(buffer);
 
             // https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-system_logical_processor_information_ex
@@ -743,52 +806,42 @@ void xsys_init(XSystemInfo* info)
             BOOL ok = GetLogicalProcessorInformationEx(RelationProcessorCore, pIterator, &bufferSize);
             if (ok)
             {
-                int   NumPCores = 0;
-                int   NumECores = 0;
-                DWORD offset    = 0;
+                int64_t level_keys[XSYS_ARRLEN(info->num_logical_cores_for_perf_level)];
+                DWORD   offset = 0;
 
                 while (offset < bufferSize)
                 {
                     xsys_assert(pIterator->Relationship == RelationProcessorCore);
-                    if (pIterator->Processor.EfficiencyClass > 0)
-                    {
-                        NumPCores++;
-                    }
-                    else
-                    {
-                        // TODO: figure out how to detect "low power e-cores", distinct from regular e cores
-                        NumECores++;
-                    }
+                    const PROCESSOR_RELATIONSHIP* core = &pIterator->Processor;
+
+                    // Each set bit in the group masks is a logical processor on this core
+                    uint64_t NumThreads = 0;
+                    for (WORD g = 0; g < core->GroupCount; g++)
+                        for (KAFFINITY mask = core->GroupMask[g].Mask; mask; mask &= mask - 1)
+                            NumThreads++;
+
+                    // Higher EfficiencyClass means higher performance. Non hybrid CPUs report 0 for every core
+                    // TODO: figure out how to detect "low power e-cores", distinct from regular e cores
+                    int level = xsys_get_perf_level(info, level_keys, core->EfficiencyClass);
+                    info->num_physical_cores_for_perf_level[level] += 1;
+                    info->num_logical_cores_for_perf_level[level]  += NumThreads;
 
                     offset    += pIterator->Size;
                     pIterator  = (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX)((BYTE*)buffer + offset);
                 }
-
-                info->num_cores = NumPCores + NumECores;
-
-                if (NumPCores && NumECores)
-                {
-                    info->num_core_perf_levels        = 2;
-                    info->num_cores_for_perf_level[0] = NumECores;
-                    info->num_cores_for_perf_level[1] = NumPCores;
-                }
-                else
-                {
-                    info->num_core_perf_levels        = 1;
-                    info->num_cores_for_perf_level[0] = info->num_cores;
-                }
             }
         }
 
-        if (info->num_cores == 0) // fallback
+        if (info->num_core_perf_levels == 0) // fallback
         {
-            // If the processor sypports hyperthreading, you will likely get the thread count, not the core count...
+            // Only gives the logical processor count
             // https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-getsysteminfo
             // https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/ns-sysinfoapi-system_info
             SYSTEM_INFO si;
             ZeroMemory(&si, sizeof(si));
             GetSystemInfo(&si);
-            info->num_cores = si.dwNumberOfProcessors;
+            info->num_core_perf_levels                = 1;
+            info->num_logical_cores_for_perf_level[0] = si.dwNumberOfProcessors;
         }
     }
 
@@ -812,6 +865,8 @@ void xsys_init(XSystemInfo* info)
     {
         xsys_get_gpus_DXGI(info);
     }
+    if (info->num_gpus > 0)
+        info->has_gpu = XSYSTEM_INFO_BOOL_TRUE;
 
     // Monitors. ~0.12ms
     EnumDisplayMonitors(NULL, NULL, xsys_monitor_enum_proc, (LPARAM)info);
@@ -887,16 +942,27 @@ void xsys_init(XSystemInfo* info)
     // CPU ~0.010ms
     {
         sysctl_str("machdep.cpu.brand_string", info->cpu_name.buffer, sizeof(info->cpu_name));
-        sysctl_u64("hw.ncpu", &info->num_cores);
-        sysctl_u64("hw.nperflevels", &info->num_core_perf_levels);
 
-        for (int i = 0; i < info->num_core_perf_levels && i < XSYS_ARRLEN(info->num_cores_for_perf_level); i++)
+        // hw.nperflevels requires macOS 12+. perflevel0 is the fastest cores, which matches our ordering
+        if (sysctl_u64("hw.nperflevels", &info->num_core_perf_levels) == 0)
         {
-            char key[32] = {0};
-            snprintf(key, sizeof(key), "hw.perflevel%d.logicalcpu", i);
+            if (info->num_core_perf_levels > XSYS_ARRLEN(info->num_logical_cores_for_perf_level))
+                info->num_core_perf_levels = XSYS_ARRLEN(info->num_logical_cores_for_perf_level);
 
-            uint64_t* dest = &info->num_cores_for_perf_level[i];
-            sysctl_u64(key, dest);
+            for (int i = 0; i < info->num_core_perf_levels; i++)
+            {
+                char key[32] = {0};
+                snprintf(key, sizeof(key), "hw.perflevel%d.physicalcpu", i);
+                sysctl_u64(key, &info->num_physical_cores_for_perf_level[i]);
+                snprintf(key, sizeof(key), "hw.perflevel%d.logicalcpu", i);
+                sysctl_u64(key, &info->num_logical_cores_for_perf_level[i]);
+            }
+        }
+        else // fallback
+        {
+            info->num_core_perf_levels = 1;
+            sysctl_u64("hw.physicalcpu", &info->num_physical_cores_for_perf_level[0]);
+            sysctl_u64("hw.logicalcpu", &info->num_logical_cores_for_perf_level[0]);
         }
     }
 
@@ -943,6 +1009,12 @@ void xsys_init(XSystemInfo* info)
             // Not sure if I trust these numbers...
             ginfo->vram_used_bytes = [device currentAllocatedSize];
         }
+
+        // An empty list means Metal found no GPUs (eg. some VMs). A nil list means we couldn't check
+        if (info->num_gpus > 0)
+            info->has_gpu = XSYSTEM_INFO_BOOL_TRUE;
+        else if (devices != nil)
+            info->has_gpu = XSYSTEM_INFO_BOOL_FALSE;
 
         [devices release];
     }
@@ -1030,6 +1102,480 @@ void xsys_init(XSystemInfo* info)
 
 #endif // __APPLE__
 
+#ifdef __linux__
+
+#include <dirent.h>
+#include <fcntl.h>
+#include <limits.h>
+#include <stdlib.h>
+#include <sys/sysinfo.h>
+#include <sys/utsname.h>
+#include <unistd.h>
+
+#if defined(__x86_64__) || defined(__i386__)
+#include <cpuid.h>
+#endif
+
+// Reads a small text file (eg. from /proc or /sys) into 'out' and strips trailing whitespace
+// Returns the length, or -1 on failure
+static int xsys_read_file(const char* path, char* out, size_t out_sz)
+{
+    out[0] = '\0';
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0)
+        return -1;
+    ssize_t n = read(fd, out, out_sz - 1);
+    close(fd);
+    if (n < 0)
+        return -1;
+    while (n > 0 && (out[n - 1] == '\n' || out[n - 1] == ' ' || out[n - 1] == '\0'))
+        n--;
+    out[n] = '\0';
+    return (int)n;
+}
+
+// Reads a number from a file. Handles hex values prefixed with "0x", eg. PCI IDs
+static int64_t xsys_read_int(const char* path, int64_t fallback)
+{
+    char buf[32];
+    if (xsys_read_file(path, buf, sizeof(buf)) <= 0)
+        return fallback;
+    return strtoll(buf, NULL, 0);
+}
+
+// Finds the line starting with 'key' and returns the text after 'key', or NULL
+static const char* xsys_find_line(const char* text, const char* key)
+{
+    const size_t len = strlen(key);
+    for (const char* line = text; line != NULL;)
+    {
+        if (strncmp(line, key, len) == 0)
+            return line + len;
+        line = strchr(line, '\n');
+        if (line)
+            line++;
+    }
+    return NULL;
+}
+
+// Returns true if 'cpu' is in a kernel CPU list, eg. "0-11,16,18-19"
+static bool xsys_cpulist_contains(const char* list, int cpu)
+{
+    const char* p = list;
+    while (*p)
+    {
+        char* end;
+        long  first = strtol(p, &end, 10);
+        if (end == p)
+            break;
+        long last = first;
+        if (*end == '-')
+        {
+            p    = end + 1;
+            last = strtol(p, &end, 10);
+        }
+        if (cpu >= first && cpu <= last)
+            return true;
+        if (*end != ',')
+            break;
+        p = end + 1;
+    }
+    return false;
+}
+
+static const char* xsys_pci_vendor_name(int64_t vendor)
+{
+    switch (vendor)
+    {
+    case 0x1002:
+        return "AMD";
+    case 0x10de:
+        return "NVIDIA";
+    case 0x8086:
+        return "Intel";
+    }
+    return NULL;
+}
+
+// Looks up a PCI device name in the pci.ids database, eg. "Navi 21 [Radeon RX 6800/6800 XT / 6900 XT]"
+// It's usually installed, but not always. The file is ~1.5MB, so this takes a few ms
+static bool xsys_pci_device_name(int64_t vendor, int64_t device, char* out, size_t out_sz)
+{
+    static const char* paths[] = {"/usr/share/hwdata/pci.ids", "/usr/share/misc/pci.ids"};
+
+    FILE* f = NULL;
+    for (int i = 0; i < (int)XSYS_ARRLEN(paths) && f == NULL; i++)
+        f = fopen(paths[i], "r");
+    if (f == NULL)
+        return false;
+
+    // Format:
+    // 1002  Advanced Micro Devices, Inc. [AMD/ATI]
+    // \t73bf  Navi 21 [Radeon RX 6800/6800 XT / 6900 XT]
+    // \t\t1002 0e3a  Radeon Pro W6900X   <- subsystem, ignored
+    char line[512];
+    bool in_vendor = false;
+    bool found     = false;
+    while (!found && fgets(line, sizeof(line), f))
+    {
+        if (line[0] == '#' || line[0] == '\n')
+            continue;
+        if (line[0] != '\t')
+        {
+            if (in_vendor)
+                break; // Passed the end of our vendor's devices
+            in_vendor = strtoll(line, NULL, 16) == vendor;
+            continue;
+        }
+        if (!in_vendor || line[1] == '\t')
+            continue;
+
+        char*   name = NULL;
+        int64_t id   = strtoll(line + 1, &name, 16);
+        if (id == device)
+        {
+            while (*name == ' ')
+                name++;
+            snprintf(out, out_sz, "%.*s", (int)strcspn(name, "\n"), name);
+            found = true;
+        }
+    }
+    fclose(f);
+    return found;
+}
+
+// Gets the monitor name and native resolution from the 128 byte EDID base block
+// https://en.wikipedia.org/wiki/Extended_Display_Identification_Data
+static void xsys_parse_edid(const unsigned char* edid, struct XMonitorInfo* m)
+{
+    // 4x 18 byte descriptors
+    for (int i = 0; i < 4; i++)
+    {
+        const unsigned char* d           = edid + 54 + i * 18;
+        const int            pixel_clock = d[0] | (d[1] << 8);
+        if (pixel_clock != 0)
+        {
+            // Detailed timing. The first one is the preferred mode, which is the monitors native resolution
+            if (m->physical_pixels_x == 0)
+            {
+                m->physical_pixels_x = d[2] | ((d[4] & 0xf0) << 4);
+                m->physical_pixels_y = d[5] | ((d[7] & 0xf0) << 4);
+            }
+        }
+        else if (d[3] == 0xfc)
+        {
+            // Display name. Up to 13 chars, terminated by '\n' and padded with spaces
+            char name[14] = {0};
+            memcpy(name, d + 5, 13);
+            size_t len = strcspn(name, "\n");
+            while (len > 0 && name[len - 1] == ' ')
+                len--;
+            if (len > 0)
+                snprintf(m->name.buffer, sizeof(m->name), "%.*s", (int)len, name);
+        }
+    }
+}
+
+void xsys_init(XSystemInfo* info)
+{
+    if (info->init == XSYSTEM_INFO_BOOL_TRUE)
+        return;
+    info->init = XSYSTEM_INFO_BOOL_TRUE;
+
+    // OS. eg. "Ubuntu 24.04.1 LTS". The version numbers are the kernel version, as distro versions aren't always
+    // numeric (Arch has none)
+    {
+        char        text[2048];
+        const char* name = NULL;
+        if (xsys_read_file("/etc/os-release", text, sizeof(text)) > 0 ||
+            xsys_read_file("/usr/lib/os-release", text, sizeof(text)) > 0)
+        {
+            name = xsys_find_line(text, "PRETTY_NAME=");
+        }
+
+        struct utsname u;
+        const bool     has_uname = uname(&u) == 0;
+
+        if (name)
+        {
+            if (*name == '"' || *name == '\'')
+                name++;
+            snprintf(info->os_name.buffer, sizeof(info->os_name), "%.*s", (int)strcspn(name, "\"'\n"), name);
+        }
+        else if (has_uname)
+        {
+            snprintf(info->os_name.buffer, sizeof(info->os_name), "%s", u.sysname);
+        }
+
+        if (has_uname)
+        {
+            sscanf(
+                u.release,
+                "%d.%d.%d",
+                &info->os_version_number_major,
+                &info->os_version_number_minor,
+                &info->os_version_number_patch);
+        }
+    }
+
+    // Missing in WSL and some VMs
+    xsys_read_file("/sys/class/dmi/id/product_name", info->model_name.buffer, sizeof(info->model_name));
+
+    // CPU
+    {
+#if defined(__x86_64__) || defined(__i386__)
+        unsigned int  max_leaf = 0, unused;
+        unsigned int* brand    = (unsigned int*)info->cpu_name.buffer;
+        _Static_assert(sizeof(info->cpu_name) > 48, "Increase buffer capacity");
+        if (__get_cpuid(0x80000000, &max_leaf, &unused, &unused, &unused) && max_leaf >= 0x80000004)
+        {
+            __get_cpuid(0x80000002, brand + 0, brand + 1, brand + 2, brand + 3);
+            __get_cpuid(0x80000003, brand + 4, brand + 5, brand + 6, brand + 7);
+            __get_cpuid(0x80000004, brand + 8, brand + 9, brand + 10, brand + 11);
+        }
+#endif
+        if (info->cpu_name.buffer[0] == '\0') // fallback
+        {
+            // The first CPU's entry is well within the first 4KB
+            char        text[4096];
+            const char* name = NULL;
+            if (xsys_read_file("/proc/cpuinfo", text, sizeof(text)) > 0)
+                name = xsys_find_line(text, "model name");
+            if (name)
+            {
+                name += strspn(name, "\t :");
+                snprintf(info->cpu_name.buffer, sizeof(info->cpu_name), "%.*s", (int)strcspn(name, "\n"), name);
+            }
+        }
+        xsys_trim_leading_spaces(&info->cpu_name);
+
+        // Intel hybrid CPUs list their P & E cores under separate PMUs. Hidden in WSL and most VMs
+        int64_t    level_keys[XSYS_ARRLEN(info->num_logical_cores_for_perf_level)];
+        char       p_cores[256], e_cores[256];
+        const bool is_intel_hybrid = xsys_read_file("/sys/devices/cpu_core/cpus", p_cores, sizeof(p_cores)) > 0 &&
+                                     xsys_read_file("/sys/devices/cpu_atom/cpus", e_cores, sizeof(e_cores)) > 0;
+
+        const long num_cpus = sysconf(_SC_NPROCESSORS_CONF);
+        for (int cpu = 0; cpu < num_cpus; cpu++)
+        {
+            char path[128];
+
+            // cpu0 usually can't be taken offline, so has no 'online' file
+            snprintf(path, sizeof(path), "/sys/devices/system/cpu/cpu%d/online", cpu);
+            if (xsys_read_int(path, 1) == 0)
+                continue;
+
+            int64_t key = 0;
+            if (is_intel_hybrid)
+            {
+                key = xsys_cpulist_contains(p_cores, cpu) ? 1 : 0;
+            }
+            else
+            {
+#if !defined(__x86_64__) && !defined(__i386__)
+                // ARM big.LITTLE reports relative performance (max 1024). On x86 this is either missing, or on AMD
+                // it varies slightly between cores of the same type, so we don't use it there
+                snprintf(path, sizeof(path), "/sys/devices/system/cpu/cpu%d/cpu_capacity", cpu);
+                key = xsys_read_int(path, 1024);
+#endif
+            }
+
+            int level = xsys_get_perf_level(info, level_keys, key);
+            info->num_logical_cores_for_perf_level[level]++;
+
+            // Count each physical core once, by its first hardware thread
+            char siblings[256];
+            snprintf(path, sizeof(path), "/sys/devices/system/cpu/cpu%d/topology/thread_siblings_list", cpu);
+            if (xsys_read_file(path, siblings, sizeof(siblings)) > 0 && strtol(siblings, NULL, 10) == cpu)
+                info->num_physical_cores_for_perf_level[level]++;
+        }
+
+        if (info->num_core_perf_levels == 0) // fallback. /sys isn't mounted, eg. in some sandboxes
+        {
+            info->num_core_perf_levels                = 1;
+            info->num_logical_cores_for_perf_level[0] = sysconf(_SC_NPROCESSORS_ONLN);
+        }
+    }
+
+    // RAM
+    {
+        char text[4096];
+        if (xsys_read_file("/proc/meminfo", text, sizeof(text)) > 0)
+        {
+            // Values are in kB. MemAvailable counts reclaimable page cache as free
+            const char* total     = xsys_find_line(text, "MemTotal:");
+            const char* available = xsys_find_line(text, "MemAvailable:");
+            if (total && available)
+            {
+                info->ram_max_bytes  = strtoll(total, NULL, 10) * 1024;
+                info->ram_used_bytes = info->ram_max_bytes - strtoll(available, NULL, 10) * 1024;
+            }
+        }
+        if (info->ram_max_bytes == 0) // fallback
+        {
+            struct sysinfo si;
+            if (sysinfo(&si) == 0)
+            {
+                info->ram_max_bytes  = (int64_t)si.totalram * si.mem_unit;
+                info->ram_used_bytes = (int64_t)(si.totalram - si.freeram - si.bufferram) * si.mem_unit;
+            }
+        }
+    }
+
+    // GPUs. Listed from the PCI bus rather than /sys/class/drm, so GPUs without a loaded driver are still found, and
+    // we can be sure there are none if the bus has no display controllers
+    DIR*           pci_dir = opendir("/sys/bus/pci/devices");
+    struct dirent* pci_entry;
+    while (pci_dir != NULL && info->num_gpus < (int)XSYS_ARRLEN(info->gpus) && (pci_entry = readdir(pci_dir)) != NULL)
+    {
+        if (pci_entry->d_name[0] == '.')
+            continue;
+
+        char        path[PATH_MAX];
+        char        device_path[PATH_MAX];
+        const char* pci_addr = pci_entry->d_name; // eg. "0000:01:00.0"
+        snprintf(device_path, sizeof(device_path), "/sys/bus/pci/devices/%s", pci_addr);
+
+        // Class 0x03 is a display controller, eg. 0x030000 VGA, or 0x030200 3D (eg. the dGPU in some laptops)
+        snprintf(path, sizeof(path), "%s/class", device_path);
+        if ((xsys_read_int(path, 0) >> 16) != 0x03)
+            continue;
+
+        snprintf(path, sizeof(path), "%s/vendor", device_path);
+        const int64_t vendor = xsys_read_int(path, 0);
+        snprintf(path, sizeof(path), "%s/device", device_path);
+        const int64_t device = xsys_read_int(path, 0);
+
+        // Microsoft's Hyper-V GPU adapters (eg. in WSL2) hide the real GPU, and include the software renderer
+        if (vendor == 0 || vendor == 0x1414)
+            continue;
+
+        struct XGPUInfo* ginfo = &info->gpus[info->num_gpus];
+
+        // The NVIDIA proprietary driver has the marketing name, eg. "NVIDIA GeForce RTX 3080"
+        char        nvidia_info[1024];
+        const char* model = NULL;
+        snprintf(path, sizeof(path), "/proc/driver/nvidia/gpus/%s/information", pci_addr);
+        if (xsys_read_file(path, nvidia_info, sizeof(nvidia_info)) > 0)
+            model = xsys_find_line(nvidia_info, "Model:");
+
+        const char* vendor_name = xsys_pci_vendor_name(vendor);
+        char        device_name[sizeof(ginfo->name)];
+        if (model)
+        {
+            model += strspn(model, " \t");
+            snprintf(ginfo->name.buffer, sizeof(ginfo->name), "%.*s", (int)strcspn(model, "\n"), model);
+        }
+        else if (xsys_pci_device_name(vendor, device, device_name, sizeof(device_name)))
+        {
+            if (vendor_name)
+                snprintf(ginfo->name.buffer, sizeof(ginfo->name), "%s %s", vendor_name, device_name);
+            else
+                snprintf(ginfo->name.buffer, sizeof(ginfo->name), "%s", device_name);
+        }
+        else if (vendor_name)
+        {
+            snprintf(ginfo->name.buffer, sizeof(ginfo->name), "%s 0x%04llx", vendor_name, (unsigned long long)device);
+        }
+        else
+        {
+            snprintf(
+                ginfo->name.buffer,
+                sizeof(ginfo->name),
+                "0x%04llx 0x%04llx",
+                (unsigned long long)vendor,
+                (unsigned long long)device);
+        }
+
+        // Only amdgpu reports VRAM. NVIDIA requires NVML
+        snprintf(path, sizeof(path), "%s/mem_info_vram_total", device_path);
+        ginfo->vram_max_bytes = xsys_read_int(path, 0);
+        snprintf(path, sizeof(path), "%s/mem_info_vram_used", device_path);
+        ginfo->vram_used_bytes = xsys_read_int(path, 0);
+
+        // Heuristic. Intel iGPUs sit on PCI bus 0, while discrete Intel Arc cards don't. NVIDIA GPUs on PCI are
+        // discrete. AMD APUs and discrete cards look the same here
+        unsigned int bus = 0;
+        sscanf(pci_addr, "%*x:%x:", &bus);
+        if (vendor == 0x8086)
+            ginfo->is_unified_memory = bus == 0 ? XSYSTEM_INFO_BOOL_TRUE : XSYSTEM_INFO_BOOL_FALSE;
+        else if (vendor == 0x10de)
+            ginfo->is_unified_memory = XSYSTEM_INFO_BOOL_FALSE;
+
+        // The GPU the firmware booted with
+        snprintf(path, sizeof(path), "%s/boot_vga", device_path);
+        if (xsys_read_int(path, 0) == 1)
+            info->default_gpu_idx = info->num_gpus;
+
+        info->num_gpus++;
+    }
+    if (pci_dir)
+        closedir(pci_dir);
+
+    // WSL2 passes GPUs through /dev/dxg instead of PCI, so finding none doesn't mean there are none
+    if (info->num_gpus > 0)
+        info->has_gpu = XSYSTEM_INFO_BOOL_TRUE;
+    else if (pci_dir != NULL && access("/dev/dxg", F_OK) != 0)
+        info->has_gpu = XSYSTEM_INFO_BOOL_FALSE;
+
+    // Monitors. Read straight from the kernel, so no X11/Wayland connection is needed, but this means we only get
+    // the name and native resolution. Empty in WSL, and with NVIDIA's driver unless nvidia-drm.modeset=1
+    {
+        DIR*           dir = opendir("/sys/class/drm");
+        struct dirent* entry;
+        while (dir != NULL && info->num_monitors < (int)XSYS_ARRLEN(info->monitors) && (entry = readdir(dir)) != NULL)
+        {
+            // Connectors are named like "card0-DP-1"
+            const char* connector = strchr(entry->d_name, '-');
+            if (strncmp(entry->d_name, "card", 4) != 0 || connector == NULL)
+                continue;
+
+            char path[PATH_MAX];
+            char status[32];
+            snprintf(path, sizeof(path), "/sys/class/drm/%s/status", entry->d_name);
+            xsys_read_file(path, status, sizeof(status));
+            if (strcmp(status, "connected") != 0)
+                continue;
+
+            struct XMonitorInfo* m = &info->monitors[info->num_monitors++];
+            snprintf(m->name.buffer, sizeof(m->name), "%s", connector + 1); // Replaced by the EDID name if found
+
+            unsigned char edid[128];
+            ssize_t       n = -1;
+            snprintf(path, sizeof(path), "/sys/class/drm/%s/edid", entry->d_name);
+            int fd = open(path, O_RDONLY | O_CLOEXEC);
+            if (fd >= 0)
+            {
+                n = read(fd, edid, sizeof(edid));
+                close(fd);
+            }
+            static const unsigned char edid_header[8] = {0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00};
+            if (n == sizeof(edid) && memcmp(edid, edid_header, sizeof(edid_header)) == 0)
+                xsys_parse_edid(edid, m);
+        }
+        if (dir)
+            closedir(dir);
+    }
+}
+
+#endif // __linux__
+
+uint64_t xsys_num_physical_cores(const XSystemInfo* info)
+{
+    uint64_t n = 0;
+    for (uint64_t i = 0; i < info->num_core_perf_levels; i++)
+        n += info->num_physical_cores_for_perf_level[i];
+    return n;
+}
+
+uint64_t xsys_num_logical_cores(const XSystemInfo* info)
+{
+    uint64_t n = 0;
+    for (uint64_t i = 0; i < info->num_core_perf_levels; i++)
+        n += info->num_logical_cores_for_perf_level[i];
+    return n;
+}
+
 void xsys_print(XSystemInfo* info)
 {
     if (info->init != XSYSTEM_INFO_BOOL_TRUE)
@@ -1039,11 +1585,18 @@ void xsys_print(XSystemInfo* info)
     if (info->model_name.buffer[0])
         printf("Model            : %s\n", info->model_name.buffer);
     printf("CPU              : %s\n", info->cpu_name.buffer);
-    printf("  - Total Cores  : %llu\n", info->num_cores);
-    for (int i = 0; i < info->num_core_perf_levels; i++)
+    printf(
+        "  - Cores        : %llu physical, %llu logical\n",
+        (unsigned long long)xsys_num_physical_cores(info),
+        (unsigned long long)xsys_num_logical_cores(info));
+    // Fastest cores first
+    for (int i = 0; info->num_core_perf_levels > 1 && i < (int)info->num_core_perf_levels; i++)
     {
-        int count = info->num_cores_for_perf_level[i];
-        printf("  - P%d Cores     : %d\n", i, count);
+        printf(
+            "  - Perf level %d : %llu physical, %llu logical\n",
+            i,
+            (unsigned long long)info->num_physical_cores_for_perf_level[i],
+            (unsigned long long)info->num_logical_cores_for_perf_level[i]);
     }
 
     const double one_gb   = (double)(1 << 30); // 1 GB
@@ -1063,6 +1616,10 @@ void xsys_print(XSystemInfo* info)
         const char* memtype = _sysbool_to_string[ginfo->is_unified_memory];
         printf("  - VRAM         : %.3f/%.3f MB, Unified (%s)\n", used_mb, total_mb, memtype);
     }
+    if (info->has_gpu == XSYSTEM_INFO_BOOL_FALSE)
+        printf("GPU              : None\n");
+    else if (info->num_gpus == 0)
+        printf("GPU              : Unknown (failed to detect)\n");
 
     for (int i = 0; i < info->num_monitors; i++)
     {

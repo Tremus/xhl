@@ -1,4 +1,4 @@
-// Tests xhl/system.h. On Linux this is blocked by system.h having no Linux implementation of xsys_init()
+// Tests xhl/system.h
 //
 // Only checks things every desktop has. GPUs and monitors are printed but not checked, so this can still pass on
 // headless CI machines
@@ -26,7 +26,14 @@ int main(void)
     XTEST_ASSERT(info->os_version_number_major > 0);
 
     XTEST_ASSERT(info->cpu_name.buffer[0] != '\0');
-    XTEST_ASSERT(info->num_cores > 0);
+    XTEST_ASSERT(info->num_core_perf_levels >= 1 && info->num_core_perf_levels <= 8);
+    XTEST_ASSERT(xsys_num_logical_cores(info) > 0);
+    XTEST_ASSERT(xsys_num_physical_cores(info) <= xsys_num_logical_cores(info));
+    for (int i = 0; i < (int)info->num_core_perf_levels; i++)
+    {
+        XTEST_ASSERT(info->num_logical_cores_for_perf_level[i] > 0);
+        XTEST_ASSERT(info->num_physical_cores_for_perf_level[i] <= info->num_logical_cores_for_perf_level[i]);
+    }
 
     // Between 512MB and 64TB
     XTEST_ASSERT(info->ram_max_bytes > (512ll << 20));
@@ -35,6 +42,7 @@ int main(void)
     XTEST_ASSERT(info->ram_used_bytes <= info->ram_max_bytes);
 
     XTEST_ASSERT(info->num_gpus >= 0 && info->num_gpus <= 8);
+    XTEST_ASSERT((info->num_gpus > 0) == (info->has_gpu == XSYSTEM_INFO_BOOL_TRUE));
     XTEST_ASSERT(info->num_monitors >= 0 && info->num_monitors <= 8);
     for (int i = 0; i < info->num_monitors; i++)
     {
