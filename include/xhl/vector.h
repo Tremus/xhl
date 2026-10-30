@@ -25,7 +25,7 @@ typedef union
     struct { int height, width; };
     struct { int h, w; };
     int data[2];
-    unsigned long long u64;
+    uint64_t u64;
 } xvec2i;
 
 typedef union
@@ -43,7 +43,7 @@ typedef union
     struct { float angle, magnitude; };
     struct { float phase, mag; };
     float data[2];
-    unsigned long long u64;
+    uint64_t u64;
 } xvec2f;
 
 typedef union

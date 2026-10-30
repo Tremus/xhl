@@ -44,12 +44,12 @@ typedef void* xt_thread_ptr_t;
 typedef volatile unsigned char      xt_atomic_uint8_t;
 typedef volatile unsigned short     xt_atomic_uint16_t;
 typedef volatile unsigned int       xt_atomic_uint32_t;
-typedef volatile unsigned long long xt_atomic_uint64_t;
+typedef volatile uint64_t           xt_atomic_uint64_t;
 
 typedef volatile char      xt_atomic_int8_t;
 typedef volatile short     xt_atomic_int16_t;
 typedef volatile int       xt_atomic_int32_t;
-typedef volatile long long xt_atomic_int64_t;
+typedef volatile int64_t   xt_atomic_int64_t;
 typedef volatile void*     xt_atomic_ptr_t;
 typedef volatile unsigned  xt_atomic_float;
 
@@ -253,7 +253,7 @@ static inline uint32_t xt_atomic_compare_exchange_u32_ordered(xt_atomic_uint32_t
     __atomic_compare_exchange_n(ptr, &expected, desired, 0, order, order);
     return expected;
 }
-static inline uint64_t xt_atomic_compare_exchange_u64_ordered(xt_atomic_uint64_t* ptr, unsigned long long expected, uint64_t desired, enum xt_memory_order order)
+static inline uint64_t xt_atomic_compare_exchange_u64_ordered(xt_atomic_uint64_t* ptr, uint64_t expected, uint64_t desired, enum xt_memory_order order)
 {
     xthread_assert(order != xt_memory_order_release && order != xt_memory_order_acq_rel);
     __atomic_compare_exchange_n(ptr, &expected, desired, 0, order, order);
@@ -283,7 +283,7 @@ static inline int32_t xt_atomic_compare_exchange_i32_ordered(xt_atomic_int32_t* 
 static inline int64_t xt_atomic_compare_exchange_i64_ordered(xt_atomic_int64_t* ptr, int64_t expected, int64_t desired, enum xt_memory_order order)
 {
     xthread_assert(order != xt_memory_order_release && order != xt_memory_order_acq_rel);
-    unsigned long long exp = (unsigned long long)expected;
+    uint64_t exp = (uint64_t)expected;
     __atomic_compare_exchange_n((xt_atomic_uint64_t*)ptr, &exp, (uint64_t)desired, 0, order, order);
     return (int64_t)exp;
 }

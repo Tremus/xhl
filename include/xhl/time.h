@@ -307,6 +307,14 @@ void xtime_sleep_ms(uint32_t ms)
 // TODO: figure out a solution for "xtime_timer_start" and "xtime_timer_stop"
 // Linux is a 1984 OS with no shared run loop. In audio plugin land, timers come from the host's event loop
 // eg. CLAP timer-support, VST3 IRunLoop, or a standalone apps event loop
+// Until then these are stubs, and the timer never fires
+void xtime_timer_start(XTimer* t, uint32_t interval_ms, xtime_timer_cb cb, void* user_data)
+{
+    t->callback  = cb;
+    t->user_data = user_data;
+}
+
+void xtime_timer_stop(XTimer* t) { memset(t, 0, sizeof(*t)); }
 
 #elif defined(__EMSCRIPTEN__)
 #include <emscripten/emscripten.h>
