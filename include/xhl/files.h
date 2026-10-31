@@ -288,7 +288,7 @@ typedef enum XFilesUserDirectory
     XFILES_USER_DIRECTORY_HOME,
     // Windows: [HOME]\\AppData\\Roaming
     // macOS: [HOME]/Library/Application\ Support
-    // Linux: $XDG_CONFIG_HOME, default [HOME]/.config
+    // Linux: $XDG_DATA_HOME, default [HOME]/.local/share
     XFILES_USER_DIRECTORY_APPDATA,
     // Linux: The rest come from $XDG_CONFIG_HOME/user-dirs.dirs, so they may be translated, eg. [HOME]/Bureau.
     // Defaults to [HOME]/Desktop etc. Not checked to exist
@@ -2567,14 +2567,14 @@ int xfiles_get_user_directory(char* out, size_t outlen, XFilesUserDirectory loc)
         "XDG_VIDEOS_DIR",    // XFILES_USER_DIRECTORY_VIDEOS
     };
     static const char* PATHS[] = {
-        "",           // XFILES_USER_DIRECTORY_HOME
-        "/.config",   // XFILES_USER_DIRECTORY_APPDATA
-        "/Desktop",   // XFILES_USER_DIRECTORY_DESKTOP
-        "/Documents", // XFILES_USER_DIRECTORY_DOCUMENTS
-        "/Downloads", // XFILES_USER_DIRECTORY_DOWNLOADS
-        "/Music",     // XFILES_USER_DIRECTORY_MUSIC
-        "/Pictures",  // XFILES_USER_DIRECTORY_PICTURES
-        "/Videos",    // XFILES_USER_DIRECTORY_VIDEOS
+        "/",             // XFILES_USER_DIRECTORY_HOME. Trimmed below, unless HOME=/
+        "/.local/share", // XFILES_USER_DIRECTORY_APPDATA
+        "/Desktop",      // XFILES_USER_DIRECTORY_DESKTOP
+        "/Documents",    // XFILES_USER_DIRECTORY_DOCUMENTS
+        "/Downloads",    // XFILES_USER_DIRECTORY_DOWNLOADS
+        "/Music",        // XFILES_USER_DIRECTORY_MUSIC
+        "/Pictures",     // XFILES_USER_DIRECTORY_PICTURES
+        "/Videos",       // XFILES_USER_DIRECTORY_VIDEOS
     };
     _Static_assert(XFILES_ARRLEN(XDG_KEYS) == XFILES_USER_DIRECTORY_COUNT, "");
     _Static_assert(XFILES_ARRLEN(PATHS) == XFILES_USER_DIRECTORY_COUNT, "");
@@ -2596,6 +2596,10 @@ int xfiles_get_user_directory(char* out, size_t outlen, XFilesUserDirectory loc)
         home = pw.pw_dir;
     }
     size_t homelen = strlen(home);
+    // HOME=/home/u/ is legal. Trim it so it doesn't become /home/u//Desktop
+    // HOME=/ trims to "", so joins become /Desktop rather than //Desktop
+    while (homelen > 0 && home[homelen - 1] == '/')
+        homelen--;
 
     // $XDG_CONFIG_HOME, default ~/.config
     char        config_dir[PATH_MAX];
@@ -2603,15 +2607,26 @@ int xfiles_get_user_directory(char* out, size_t outlen, XFilesUserDirectory loc)
     if (xdg_config && xdg_config[0] == '/')
         snprintf(config_dir, sizeof(config_dir), "%s", xdg_config);
     else
-        snprintf(config_dir, sizeof(config_dir), "%s/.config", home);
+        snprintf(config_dir, sizeof(config_dir), "%.*s/.config", (int)homelen, home);
 
     int num = 0;
     if (loc == XFILES_USER_DIRECTORY_APPDATA)
-        num = _xfiles_concat(out, outlen, config_dir, strlen(config_dir), "", 0);
+    {
+        // $XDG_DATA_HOME, default ~/.local/share
+        const char* xdg_data = getenv("XDG_DATA_HOME");
+        if (xdg_data && xdg_data[0] == '/')
+            num = _xfiles_concat(out, outlen, xdg_data, strlen(xdg_data), "", 0);
+    }
     else if (XDG_KEYS[loc])
         num = _xfiles_read_user_dir(config_dir, XDG_KEYS[loc], home, homelen, out, outlen);
     if (num == 0)
         num = _xfiles_concat(out, outlen, home, homelen, PATHS[loc], strlen(PATHS[loc]));
+
+    // Users can "disable" their own folders by setting it to "$HOME/" in user-dirs.dirs, which xdg-user-dirs-update
+    // We remove the trailing slash because every folder path we return lacks a trailing slash. This means users of this
+    // function can safely append "/mysubdir" with a leading "/" to whatever path we give them, and never get "//"
+    while (num > 1 && out[num - 1] == '/')
+        out[--num] = '\0';
 
     XFILES_ASSERT(num > 0);
     return num;
