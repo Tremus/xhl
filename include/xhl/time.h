@@ -102,18 +102,31 @@ XDate xtime_get_date(uint64_t unix_ms)
 LARGE_INTEGER xhl_perffreq;
 LARGE_INTEGER xhl_timestart;
 
+// GetSystemTimePreciseAsFileTime is Windows 8+. It's better
+VOID(WINAPI* xhl_GetSystemTimeAsFileTime)(LPFILETIME) = GetSystemTimeAsFileTime;
+
 void xtime_init()
 {
     QueryPerformanceFrequency(&xhl_perffreq);
     QueryPerformanceCounter(&xhl_timestart);
+
+    // kernel32 is always loaded, so no LoadLibrary/FreeLibrary needed
+    FARPROC precise = GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "GetSystemTimePreciseAsFileTime");
+    if (precise)
+        xhl_GetSystemTimeAsFileTime = (VOID(WINAPI*)(LPFILETIME))(void*)precise;
 }
 
 // ~24ns per call (Intel Core Ultra 9 185H, Windows 11, clang -O2)
+// 0.1us resolution on Windows 8+. On Windows 7 it falls back to the system tick (~15.6ms unless timeBeginPeriod is
+// used on older windows)
+// Articles that may interest you about the mess that is trying to get accurate time on Windows
+// https://randomascii.wordpress.com/2013/07/08/windows-timer-resolution-megawatts-wasted/
+// https://randomascii.wordpress.com/2020/10/04/windows-timer-resolution-the-great-rule-change/
 uint64_t xtime_unix_ms()
 {
     // https://stackoverflow.com/questions/1695288/getting-the-current-time-in-milliseconds-from-the-system-clock-in-windows#1695332
     FILETIME filetime;
-    GetSystemTimePreciseAsFileTime(&filetime);
+    xhl_GetSystemTimeAsFileTime(&filetime);
     uint64_t t  = (uint64_t)filetime.dwLowDateTime + ((uint64_t)(filetime.dwHighDateTime) << 32ULL);
     t          -= 116444736000000000ULL; // convert date from Jan 1, 1601 to Jan 1 1970.
     t          /= 10000LL;               // convert units 100 nanosecods > ms
@@ -356,8 +369,8 @@ void xtime_timer_stop(XTimer* t)
 
 #endif // __EMSCRIPTEN__
 
-double   xtime_convert_ns_to_ms(uint64_t ns) { return (double)ns / 1.e6; }
-double   xtime_convert_ns_to_sec(uint64_t ns) { return (double)ns / 1.e9; }
+double xtime_convert_ns_to_ms(uint64_t ns) { return (double)ns / 1.e6; }
+double xtime_convert_ns_to_sec(uint64_t ns) { return (double)ns / 1.e9; }
 
 #ifndef NDEBUG
 
