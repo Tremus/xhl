@@ -385,6 +385,8 @@ struct xt_queue_t
 // Used for __wfe()
 // https://developer.arm.com/documentation/dui0375/g/Compiler-specific-Features/--wfe-intrinsic
 #include <arm_acle.h>
+#elif defined(__wasm__)
+// No pause/wfe hint on wasm. xt_spinlock_lock falls back to trylock + yield
 #else
 #error "Microarchitecture not supported!"
 #endif
@@ -443,7 +445,7 @@ void xthread_mutex_term(xt_mutex_t* mutex) { DeleteCriticalSection((CRITICAL_SEC
 void xthread_mutex_lock(xt_mutex_t* mutex) { EnterCriticalSection((CRITICAL_SECTION*)mutex); }
 void xthread_mutex_unlock(xt_mutex_t* mutex) { LeaveCriticalSection((CRITICAL_SECTION*)mutex); }
 
-#elif defined(__linux__) || defined(__APPLE__) || defined(__ANDROID__)
+#elif defined(__linux__) || defined(__APPLE__) || defined(__ANDROID__) || defined(__EMSCRIPTEN__)
 
 #include <errno.h>
 #include <pthread.h>
@@ -574,7 +576,7 @@ int16_t  xt_atomic_compare_exchange_i16(xt_atomic_int16_t*  ptr, int16_t  expect
 int32_t  xt_atomic_compare_exchange_i32(xt_atomic_int32_t*  ptr, int32_t  expected, int32_t  desired) { return _InterlockedCompareExchange  (ptr, desired, expected); }
 int64_t  xt_atomic_compare_exchange_i64(xt_atomic_int64_t*  ptr, int64_t  expected, int64_t  desired) { return _InterlockedCompareExchange64(ptr, desired, expected); }
 
-bool xt_spinlock_trylock(xt_spinlock_t*  ptr) { return _InterlockedCompareExchange8(ptr, 1, 0); }
+bool xt_spinlock_trylock(xt_spinlock_t*  ptr) { return _InterlockedCompareExchange8(ptr, 1, 0) == 0; }
 void xt_spinlock_unlock( xt_spinlock_t*  ptr) { return _InterlockedExchange8(ptr, 0); }
 
 #else
@@ -660,7 +662,7 @@ int16_t  xt_atomic_compare_exchange_i16(xt_atomic_int16_t*  ptr, int16_t  expect
 int32_t  xt_atomic_compare_exchange_i32(xt_atomic_int32_t*  ptr, int32_t  expected, int32_t  desired) { return __sync_val_compare_and_swap((uint32_t*)ptr, expected, desired); }
 int64_t  xt_atomic_compare_exchange_i64(xt_atomic_int64_t*  ptr, int64_t  expected, int64_t  desired) { return __sync_val_compare_and_swap((uint64_t*)ptr, expected, desired); }
 
-bool xt_spinlock_trylock(xt_spinlock_t* ptr) { return __atomic_exchange_n(ptr, 1, __ATOMIC_ACQUIRE); }
+bool xt_spinlock_trylock(xt_spinlock_t* ptr) { return __atomic_exchange_n(ptr, 1, __ATOMIC_ACQUIRE) == 0; }
 void xt_spinlock_unlock(xt_spinlock_t* ptr)  { __atomic_store_n(ptr, 0, __ATOMIC_RELEASE); }
 
 #endif
@@ -671,7 +673,7 @@ struct xthread_internal_signal_t
     CRITICAL_SECTION   mutex;
     CONDITION_VARIABLE condition;
     int                value;
-#elif defined(__linux__) || defined(__APPLE__) || defined(__ANDROID__)
+#elif defined(__linux__) || defined(__APPLE__) || defined(__ANDROID__) || defined(__EMSCRIPTEN__)
     pthread_mutex_t mutex;
     pthread_cond_t  condition;
     int             value;
@@ -687,7 +689,7 @@ void xthread_signal_init(xt_signal_t* signal)
     InitializeCriticalSectionAndSpinCount(&internal->mutex, 32);
     InitializeConditionVariable(&internal->condition);
     internal->value = 0;
-#elif defined(__linux__) || defined(__APPLE__) || defined(__ANDROID__)
+#elif defined(__linux__) || defined(__APPLE__) || defined(__ANDROID__) || defined(__EMSCRIPTEN__)
     pthread_mutex_init(&internal->mutex, NULL);
     pthread_cond_init(&internal->condition, NULL);
     internal->value = 0;
@@ -700,7 +702,7 @@ void xthread_signal_term(xt_signal_t* signal)
 
 #if defined(_WIN32)
     DeleteCriticalSection(&internal->mutex);
-#elif defined(__linux__) || defined(__APPLE__) || defined(__ANDROID__)
+#elif defined(__linux__) || defined(__APPLE__) || defined(__ANDROID__) || defined(__EMSCRIPTEN__)
     pthread_mutex_destroy(&internal->mutex);
     pthread_cond_destroy(&internal->condition);
 #endif
@@ -715,7 +717,7 @@ void xthread_signal_raise(xt_signal_t* signal)
     internal->value = 1;
     LeaveCriticalSection(&internal->mutex);
     WakeConditionVariable(&internal->condition);
-#elif defined(__linux__) || defined(__APPLE__) || defined(__ANDROID__)
+#elif defined(__linux__) || defined(__APPLE__) || defined(__ANDROID__) || defined(__EMSCRIPTEN__)
     pthread_mutex_lock(&internal->mutex);
     internal->value = 1;
     pthread_mutex_unlock(&internal->mutex);
@@ -745,7 +747,7 @@ int xthread_signal_wait(xt_signal_t* signal, int timeout_ms)
     LeaveCriticalSection(&internal->mutex);
     return ! timed_out;
 
-#elif defined(__linux__) || defined(__APPLE__) || defined(__ANDROID__)
+#elif defined(__linux__) || defined(__APPLE__) || defined(__ANDROID__) || defined(__EMSCRIPTEN__)
 
     struct timespec ts;
     if (timeout_ms >= 0)
@@ -806,7 +808,7 @@ void xthread_timer_wait(xt_timer_t* timer, uint64_t nanoseconds)
     BOOL b            = SetWaitableTimer(*(HANDLE*)timer, &due_time, 0, 0, 0, FALSE);
     (void)b;
     WaitForSingleObject(*(HANDLE*)timer, INFINITE);
-#elif defined(__linux__) || defined(__APPLE__) || defined(__ANDROID__)
+#elif defined(__linux__) || defined(__APPLE__) || defined(__ANDROID__) || defined(__EMSCRIPTEN__)
     struct timespec rem;
     struct timespec req;
     req.tv_sec  = nanoseconds / 1000000000ULL;
@@ -893,7 +895,7 @@ int xthread_queue_count(xt_queue_t* queue) { return xt_atomic_load_i32(&queue->c
 
 void xt_spinlock_lock(xt_atomic_uint8_t* ptr)
 {
-#ifdef __SSE2__
+#if defined(__x86_64__) || defined(_M_X64)
 
     // Stage 1: ~25ns
     for (int i = 0; i < 5; i++)
@@ -929,6 +931,10 @@ void xt_spinlock_lock(xt_atomic_uint8_t* ptr)
         xthread_yield();
     }
 
+    // Stage 4: never give up without the lock
+    while (!xt_spinlock_trylock(ptr))
+        xthread_yield();
+
 #elif defined(__arm64__)
 
     // Stage 1: ~20ns
@@ -946,6 +952,20 @@ void xt_spinlock_lock(xt_atomic_uint8_t* ptr)
 
         xthread_yield();
     }
+
+    // Stage 3: never give up without the lock
+    while (!xt_spinlock_trylock(ptr))
+        xthread_yield();
+
+#else // wasm: no pause/wfe hint
+
+    while (!xt_spinlock_trylock(ptr))
+    {
+        // Spin on a plain load until the lock looks free, so we don't hammer the cache line with writes
+        for (int i = 0; i < 64 && xt_atomic_load_u8(ptr); i++) {}
+        xthread_yield();
+    }
+
 #endif
 /*
 NOTE: only this function is under the Boost license
