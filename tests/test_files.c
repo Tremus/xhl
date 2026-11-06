@@ -63,6 +63,28 @@ static void on_list_item(void* data, const xfiles_list_item_t* item)
         res->num_txt++;
 }
 
+// Looks for an exact, case sensitive name in a listing. Listings return names as they're stored on disk
+typedef struct FindName
+{
+    const char* name;
+    bool        found;
+} FindName;
+
+static void on_find_name(void* data, const xfiles_list_item_t* item)
+{
+    FindName*   res  = data;
+    const char* name = item->path + item->name_idx;
+    if (strcmp(name, res->name) == 0)
+        res->found = true;
+}
+
+static bool list_has_exact_name(const char* dir, const char* name)
+{
+    FindName res = {name, false};
+    xfiles_list(dir, &res, on_find_name);
+    return res.found;
+}
+
 typedef struct WatchResult
 {
     bool created;
@@ -228,6 +250,40 @@ int main(void)
     {
         XTEST_ASSERT(xfiles_delete(path_a));
         XTEST_ASSERT(!xfiles_exists(path_a));
+    }
+
+    // Case only rename. On case insensitive file systems (Windows, macOS default) the new name "exists" before the
+    // move, because it's the same file. The move must still change the stored name
+    {
+        char lower[640];
+        char upper[640];
+        char lower_dir[640];
+        char upper_dir[640];
+        join_path(lower, sizeof(lower), root, "case.txt");
+        join_path(upper, sizeof(upper), root, "Case.txt");
+        join_path(lower_dir, sizeof(lower_dir), root, "casedir");
+        join_path(upper_dir, sizeof(upper_dir), root, "CaseDir");
+
+        XTEST_ASSERT(xfiles_write(lower, "c", 1));
+        const bool upper_exists = xfiles_exists(upper);
+        fprintf(stderr, "  case insensitive file system: %s\n", upper_exists ? "yes" : "no");
+
+        const bool moved_file = xfiles_move(lower, upper, XFILES_MOVE_DEFAULT);
+        XTEST_ASSERT(moved_file);
+        const bool has_upper = list_has_exact_name(root, "Case.txt");
+        const bool has_lower = list_has_exact_name(root, "case.txt");
+        XTEST_ASSERT(has_upper);
+        XTEST_ASSERT(!has_lower);
+
+        XTEST_ASSERT(xfiles_create_directory(lower_dir));
+        const bool moved_dir = xfiles_move(lower_dir, upper_dir, XFILES_MOVE_DEFAULT);
+        XTEST_ASSERT(moved_dir);
+        const bool has_upper_dir = list_has_exact_name(root, "CaseDir");
+        const bool has_lower_dir = list_has_exact_name(root, "casedir");
+        XTEST_ASSERT(has_upper_dir);
+        XTEST_ASSERT(!has_lower_dir);
+
+        // Left for the trash at the end to clean up
     }
 
     // Watch
