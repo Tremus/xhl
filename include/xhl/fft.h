@@ -2607,9 +2607,55 @@ FI void cfft32_avx2(const float* in, float* out, int inv)
         store_il8_avx2(out + 16 * m, v[m].r, v[m].i);
 }
 
+// Complex FFT of 64 points in registers (in == out allowed: everything is loaded first). j = 8a + b, k = c + 8d: radix 8
+// over a, lane-parallel (lane l holds b = LANE_SUB[l], as cv_ld_il loads it), twiddle W_64^(b*c), an 8x8 transpose (rows
+// fed in LANE_SUB order, so lane i then holds c = LANE_SUB[i]), radix 8 over b, lane-parallel: vector d holds bins
+// 8d + c in LANE_SUB lane order, which cv_st_il stores in natural order. The twiddles are the plan's cross-lane ones:
+// at L = 8 (real n = 128) rev[k] = 16k and xtw at 16c, lane l is W_64^(LANE_SUB[l] * c).
+// One copy for both directions: the unnormalised inverse is conj(F(conj(x))), the sign flips as xors with a mask that's
+// 0 for the forward (no branches). Inlined once per direction it was +4.6 KB for ~10 cycles less; a runtime re / im
+// swap instead (also an inverse: swap(x) = i conj(x)) made clang merge two sets of 16 registers with moves and spills. bfly8's first layer goes through FMAs ('one', see cv_add1): adds and shuffles
+// share p1/p5 here, and that took 119 / 111 -> 110 / 109 cycles (fwd / inv)
+NI LANE_ABI_AVX2 void cfft64_avx2(const float* xtw, const float* in, float* out, int inv)
+{
+    cv_x86 v[8];
+    __m256 sg  = inv ? _mm256_set1_ps(-0.0f) : _mm256_setzero_ps();
+    __m256 one = _mm256_set1_ps(1.0f);
+    __asm__("" : "+x"(one));
+    for (int a = 0; a < 8; a++)
+    {
+        v[a]   = cv_ld_il(in + 16 * a);
+        v[a].i = _mm256_xor_ps(v[a].i, sg);
+    }
+    bfly8_avx2(v, 0, &one);
+    for (int c = 1; c < 8; c++)
+        v[c] = cv_mul_avx2(v[c], _mm256_load_ps(xtw + 16 * c), _mm256_load_ps(xtw + 16 * c + 8));
+    __m256 tr[8], ti[8];
+    for (int i = 0; i < 8; i++)
+    {
+        tr[i] = v[LANE_SUB[i]].r;
+        ti[i] = v[LANE_SUB[i]].i;
+    }
+    transpose4x2(tr);
+    transpose4x2(tr + 4);
+    transpose4x2(ti);
+    transpose4x2(ti + 4);
+    // Vector m lane i = row i lane m: the 4x4 blocks' halves. Then u[b] = row of b, rows in LANE_SUB order
+    for (int i = 0; i < 4; i++)
+    {
+        v[LANE_SUB[i]]     = (cv_x86){_mm256_permute2f128_ps(tr[i], tr[i + 4], 0x20),
+                                      _mm256_permute2f128_ps(ti[i], ti[i + 4], 0x20)};
+        v[LANE_SUB[i + 4]] = (cv_x86){_mm256_permute2f128_ps(tr[i], tr[i + 4], 0x31),
+                                      _mm256_permute2f128_ps(ti[i], ti[i + 4], 0x31)};
+    }
+    bfly8_avx2(v, 0, &one);
+    for (int d = 0; d < 8; d++)
+        cv_st_il(out + 16 * d, (cv_x86){v[d].r, _mm256_xor_ps(v[d].i, sg)});
+}
+
 // Complex FFT of n: the real plan of 2n runs exactly this as its steps 1 and 2 (zfwd_avx2, zinv_avx2), so a complex
 // plan is that plan. Its real split twiddles (rtw) go unused. n = 16 (real n = 32, dense32) is cfft16_x86, n = 32 is
-// cfft32_avx2.
+// cfft32_avx2, n = 64 cfft64_avx2.
 XFFT_DEF size_t xfft_complex_mem_size_avx2(int n) { return mem_size_avx2(2 * n); }
 XFFT_DEF void*  xfft_complex_init_avx2(void* mem, int n) { return init_avx2(mem, 2 * n); }
 
@@ -2623,6 +2669,8 @@ XFFT_DEF void xfft_complex_forward_avx2(void* p, const float* in, float* out)
         cfft16_x86(in, out, 0);
     else if (plan->n == 64)
         cfft32_avx2(in, out, 0);
+    else if (plan->n == 128)
+        cfft64_avx2(plan->xtw, in, out, 0);
     else // Lane FFTs in zbuf (2M floats, exactly the lane workspace), the cross pass writes interleaved Z to out
         zfwd_avx2(plan, in, plan->zbuf, out, 1);
 }
@@ -2637,6 +2685,8 @@ XFFT_DEF void xfft_complex_inverse_avx2(void* p, const float* in, float* out)
         cfft16_x86(in, out, 1);
     else if (plan->n == 64)
         cfft32_avx2(in, out, 1);
+    else if (plan->n == 128)
+        cfft64_avx2(plan->xtw, in, out, 1);
     else // The cross pass reads interleaved 'in' and scatters into zbuf, the lanes run there and the last stage writes
          // out. All of 'in' is read before 'out' is written, so in == out is safe
         zinv_avx2(plan, plan->zbuf, out, in, 1);
