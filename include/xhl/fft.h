@@ -2729,8 +2729,41 @@ XFFT_DEF void        xfft_complex_inverse_avx2(void* p, const float* in, float* 
 
 #if defined(XFFT_AVX_ENABLED)
 
-XFFT_DEF size_t xfft_mem_size_avx(int n) { return layout_x86(n, 0); }
-XFFT_DEF void*  xfft_init_avx(void* mem, int n) { return init_x86(mem, n); }
+// The shared plan, then (n >= 64) one more table: the inverse cross-lane pass's groups, as pairs (k0, rev[k0]) in the
+// order zinv_avx runs them. For n >= 64 the shared layout ends at plan->mat (its matrices are n = 32 only), so that's
+// where the table goes. As init_avx2.
+static size_t mem_size_avx(int n) { return layout_x86(n, 0) + ALIGN_UP((n / 128 + 1) * 2 * sizeof(int32_t)); }
+static void*  init_avx(void* mem, int n)
+{
+    Plan_x86* plan = init_x86(mem, n);
+    if (plan && n >= 64)
+    {
+        int      L = n / 16, g = 0;
+        int32_t* order = (int32_t*)plan->mat;
+        int32_t* kat   = (int32_t*)plan->zbuf; // Scratch (zbuf holds n floats >= L): the bin at each lane position
+        XFFT_ASSERT((unsigned char*)order == (unsigned char*)mem + layout_x86(n, 0));
+        for (int k = 0; k < L; k++)
+            kat[plan->rev[k] / 16] = k;
+        // Above L = 16384 (work 1 MB, so work + Z no longer fit L3 on an i5-7500), natural order again: the random row
+        // reads there cost more than the scattered writes (real 524288 inv +8%, 2^21 +23% in rev order)
+        for (int p = 0; p < L; p++)
+        {
+            int k = L > 16384 ? p : kat[p];
+            if (k % 8 == 0)
+            {
+                order[2 * g]     = k;
+                order[2 * g + 1] = plan->rev[k];
+                g++;
+            }
+        }
+        for (int p = 0; p < L; p++)
+            kat[p] = 0;
+    }
+    return plan;
+}
+
+XFFT_DEF size_t xfft_mem_size_avx(int n) { return mem_size_avx(n); }
+XFFT_DEF void*  xfft_init_avx(void* mem, int n) { return init_avx(mem, n); }
 
 // a * w
 FI cv_x86 cv_mul_avx(cv_x86 a, __m256 wr, __m256 wi)
@@ -3061,10 +3094,59 @@ FI void dense32_avx(const float* m, const float* s, __m256* v)
         v[c] = _mm256_add_ps(a[0][c], a[1][c]);
 }
 
+// The complex transforms' cross-lane groups hold bin k0 + LANE_SUB[i] in lane i: cv_st_il / cv_ld_il then move whole
+// interleaved rows in natural order with in-lane shuffles only (store_il8 / load_il8 need cross-lane ones too)
+#define CROSS_OFFSETS_IL_AVX(off)                                                                                      \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        int32_t o_[8];                                                                                                 \
+        for (int i_ = 0; i_ < 8; i_++)                                                                                 \
+            o_[i_] = off[LANE_SUB[i_]];                                                                                \
+        for (int i_ = 0; i_ < 8; i_++)                                                                                 \
+            off[i_] = o_[i_];                                                                                          \
+    }                                                                                                                  \
+    while (0)
+
+// The complex transforms' interleaved Z rows q = 0..7 of a cross-lane group are at c0 + q*r1 bytes (r1 = 8L), each
+// 64 bytes: two ymm at d = 0, 32. As ZROW_ST (no reloads of row pointers with a runtime L), spelled out from 2 bases
+// (c0, c4 = c0 + 4*r1) and 2 indexes (r1, r3 = 3*r1): row q < 4 is c0 + (0, r1, r1*2, r3)[q], row q >= 4 the same from
+// c4. sc = 0 means no index
+#define CROW_ADDR_AVX(sc, d) CROW_ADDR_AVX_##sc(d)
+#define CROW_ADDR_AVX_0(d)   "{" #d "(%1)|[%1+" #d "]}"
+#define CROW_ADDR_AVX_1(d)   "{" #d "(%1,%2,1)|[%1+%2+" #d "]}"
+#define CROW_ADDR_AVX_2(d)   "{" #d "(%1,%2,2)|[%1+%2*2+" #d "]}"
+#define CROW_ST_AVX(v, base, idx, sc, d)                                                                               \
+    __asm__ volatile("{vmovups %0, |vmovups }" CROW_ADDR_AVX(sc, d) "{|, %0}" ::"x"(v), "r"(base), "r"(idx)            \
+                     : "memory")
+#define CROW_LD_AVX(v, base, idx, sc, d)                                                                               \
+    __asm__ volatile("{vmovups |vmovups %0, }" CROW_ADDR_AVX(sc, d) "{, %0|}"                                          \
+                     : "=x"(v)                                                                                         \
+                     : "r"(base), "r"(idx)                                                                             \
+                     : "memory")
+// One row: cv_st_il / cv_ld_il
+#define CROW_ST_IL_AVX(x, base, idx, sc)                                                                               \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        CROW_ST_AVX(_mm256_unpacklo_ps((x).r, (x).i), base, idx, sc, 0);                                               \
+        CROW_ST_AVX(_mm256_unpackhi_ps((x).r, (x).i), base, idx, sc, 32);                                              \
+    }                                                                                                                  \
+    while (0)
+#define CROW_LD_IL_AVX(x, base, idx, sc)                                                                               \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        __m256 lo_, hi_;                                                                                               \
+        CROW_LD_AVX(lo_, base, idx, sc, 0);                                                                            \
+        CROW_LD_AVX(hi_, base, idx, sc, 32);                                                                           \
+        (x) = (cv_x86){_mm256_shuffle_ps(lo_, hi_, 0x88), _mm256_shuffle_ps(lo_, hi_, 0xDD)};                          \
+    }                                                                                                                  \
+    while (0)
+
 // Steps 1 and 2 of xfft_forward_avx, the complex FFT of M = n/2 for n >= 64: interleaved input 'in' -> Z in
 // zbuf, natural order, M re then M im, unscaled. 'work' is the lane workspace (out, or plan->work when L < 8).
-// Shared with xfft_complex_forward_avx
-FI void zfwd_avx(const Plan_x86* plan, const float* in, float* work)
+// Shared with xfft_complex_forward_avx, which sets 'cplx' (a literal at each call: clang can't drop the other path on
+// a pointer test) for L >= 8: Z is then written interleaved to cout instead of zbuf, and work must not be cout (the
+// cross pass gathers from all of work).
+FI void zfwd_avx(const Plan_x86* plan, const float* in, float* work, float* cout, int cplx)
 {
     int    L   = plan->n / 16;
     float* zre = plan->zbuf;
@@ -3089,8 +3171,11 @@ FI void zfwd_avx(const Plan_x86* plan, const float* in, float* work)
     {
         // 2. Cross-lane: work (already twiddled) -> Z in natural order
         ptrdiff_t l1 = 4 * (ptrdiff_t)L, l3 = 3 * l1; // Z row stride in bytes, and 3x (ZROW_ST)
+        ptrdiff_t r1 = 8 * (ptrdiff_t)L, r3 = 3 * r1; // Complex: interleaved Z row stride in bytes, and 3x (CROW_ST_AVX)
         int32_t   off[8];
         cross_offsets(plan, off);
+        if (cplx)
+            CROSS_OFFSETS_IL_AVX(off);
         for (int k0 = 0; k0 < L; k0 += 8)
         {
             const float* b = work + plan->rev[k0];
@@ -3106,6 +3191,21 @@ FI void zfwd_avx(const Plan_x86* plan, const float* in, float* work)
                 __asm__("" : "+x"(u[r].r), "+x"(u[r].i));
             }
             bfly8_avx(u, 0);
+            if (cplx)
+            {
+                // Interleaved rows Z[k0 + L*q + i] at cout + 2 * (k0 + L*q). The lanes hold bins in LANE_SUB order, so
+                // unpacklo / unpackhi hold bins 0-3 / 4-7 in natural order
+                char *c0 = (char*)(cout + 2 * k0), *c4 = c0 + 4 * r1;
+                CROW_ST_IL_AVX(u[0], c0, r1, 0);
+                CROW_ST_IL_AVX(u[1], c0, r1, 1);
+                CROW_ST_IL_AVX(u[2], c0, r1, 2);
+                CROW_ST_IL_AVX(u[3], c0, r3, 1);
+                CROW_ST_IL_AVX(u[4], c4, r1, 0);
+                CROW_ST_IL_AVX(u[5], c4, r1, 1);
+                CROW_ST_IL_AVX(u[6], c4, r1, 2);
+                CROW_ST_IL_AVX(u[7], c4, r3, 1);
+                continue;
+            }
             // Rows in ascending order (see above)
             char *b0 = (char*)(zre + k0), *b2 = b0 + 2 * l1, *b7 = b0 + 7 * l1;
             ZROW_ST0(u[0].r, b0);
@@ -3161,7 +3261,7 @@ XFFT_DEF void xfft_forward_avx(void* p, const float* in, float* out)
     float* work = L < 8 ? plan->work : out;
     float* zre  = plan->zbuf;
     float* zim  = plan->zbuf + M;
-    zfwd_avx(plan, in, work);
+    zfwd_avx(plan, in, work, 0, 0);
     {
         // 3. Real split, 8 bins k = k0+1..k0+8 and their mirrors M-k per iteration:
         // X[k] = E + W_N^k O, X[M-k] = conj(E - W_N^k O), E = (Z[k] + conj Z[M-k])/2, O = (Z[k] - conj Z[M-k])/2i
@@ -3191,36 +3291,62 @@ XFFT_DEF void xfft_forward_avx(void* p, const float* in, float* out)
 
 // Steps 2 and 1 of xfft_inverse_avx, the inverse complex FFT of M = n/2 for n >= 64 (unnormalised): Z in zbuf,
 // natural order, M re then M im -> 'out', interleaved, natural order. 'work' as in zfwd_avx.
-// Shared with xfft_complex_inverse_avx
-FI void zinv_avx(const Plan_x86* plan, float* work, float* out)
+// Shared with xfft_complex_inverse_avx, which sets 'cplx' (a literal, as in zfwd_avx) for L >= 8: Z is then read
+// interleaved from cin instead of zbuf, and work must not be cin.
+FI void zinv_avx(const Plan_x86* plan, float* work, float* out, const float* cin, int cplx)
 {
     int    L   = plan->n / 16;
     float* zre = plan->zbuf;
     {
         // 2. Inverse cross-lane: Z -> work, digit-reversed (the conj twiddles come in the first inverse lane stage)
         ptrdiff_t l1 = 4 * (ptrdiff_t)L, l3 = 3 * l1; // As in xfft_forward_avx
+        ptrdiff_t r1 = 8 * (ptrdiff_t)L, r3 = 3 * r1; // As in zfwd_avx
         int32_t   off[8];
         cross_offsets(plan, off);
-        for (int k0 = 0; k0 < L; k0 += 8)
+        if (cplx)
+            CROSS_OFFSETS_IL_AVX(off);
+        // Groups in order of rev[k0] (init_avx), not k0: each group scatters to work + rev[k0] + off[i], so the 8
+        // writes become 8 sequential streams, and the random access moves to the row reads, as in the forward
+        // (xfft_avx2 cx6: above L1 the scattered store misses cost 2.5x the forward's cross pass)
+        const int32_t* order = (const int32_t*)plan->mat;
+        for (const int32_t* og = order; og < order + 2 * ((L + 7) / 8); og += 2)
         {
-            cv_x86      u[8];
-            const char *b0 = (const char*)(zre + k0), *b2 = b0 + 2 * l1, *b7 = b0 + 7 * l1;
-            ZROW_LD0(u[0].r, b0);
-            ZROW_LD(u[1].r, b0, l1, 1);
-            ZROW_LD(u[2].r, b0, l1, 2);
-            ZROW_LD(u[3].r, b0, l3, 1);
-            ZROW_LD(u[4].r, b0, l1, 4);
-            ZROW_LD(u[5].r, b2, l3, 1);
-            ZROW_LD(u[6].r, b0, l3, 2);
-            ZROW_LD0(u[7].r, b7);
-            ZROW_LD(u[0].i, b0, l1, 8);
-            ZROW_LD(u[1].i, b7, l1, 2);
-            ZROW_LD(u[2].i, b2, l1, 8);
-            ZROW_LD(u[3].i, b7, l1, 4);
-            ZROW_LD(u[4].i, b0, l3, 4);
-            ZROW_LD(u[5].i, b7, l3, 2);
-            ZROW_LD(u[6].i, b2, l3, 4);
-            ZROW_LD(u[7].i, b7, l1, 8);
+            int    k0 = og[0];
+            cv_x86 u[8];
+            if (cplx)
+            {
+                // Interleaved rows at cin + 2 * (k0 + L*q), deinterleaved as cv_ld_il does, so lanes hold bins in
+                // LANE_SUB order (as the forward)
+                const char *c0 = (const char*)(cin + 2 * k0), *c4 = c0 + 4 * r1;
+                CROW_LD_IL_AVX(u[0], c0, r1, 0);
+                CROW_LD_IL_AVX(u[1], c0, r1, 1);
+                CROW_LD_IL_AVX(u[2], c0, r1, 2);
+                CROW_LD_IL_AVX(u[3], c0, r3, 1);
+                CROW_LD_IL_AVX(u[4], c4, r1, 0);
+                CROW_LD_IL_AVX(u[5], c4, r1, 1);
+                CROW_LD_IL_AVX(u[6], c4, r1, 2);
+                CROW_LD_IL_AVX(u[7], c4, r3, 1);
+            }
+            else
+            {
+                const char *b0 = (const char*)(zre + k0), *b2 = b0 + 2 * l1, *b7 = b0 + 7 * l1;
+                ZROW_LD0(u[0].r, b0);
+                ZROW_LD(u[1].r, b0, l1, 1);
+                ZROW_LD(u[2].r, b0, l1, 2);
+                ZROW_LD(u[3].r, b0, l3, 1);
+                ZROW_LD(u[4].r, b0, l1, 4);
+                ZROW_LD(u[5].r, b2, l3, 1);
+                ZROW_LD(u[6].r, b0, l3, 2);
+                ZROW_LD0(u[7].r, b7);
+                ZROW_LD(u[0].i, b0, l1, 8);
+                ZROW_LD(u[1].i, b7, l1, 2);
+                ZROW_LD(u[2].i, b2, l1, 8);
+                ZROW_LD(u[3].i, b7, l1, 4);
+                ZROW_LD(u[4].i, b0, l3, 4);
+                ZROW_LD(u[5].i, b7, l3, 2);
+                ZROW_LD(u[6].i, b2, l3, 4);
+                ZROW_LD(u[7].i, b7, l1, 8);
+            }
             bfly8_avx(u, 1);
             __m256 vr[8], vi[8];
             for (int r = 0; r < 8; r++)
@@ -3228,7 +3354,7 @@ FI void zinv_avx(const Plan_x86* plan, float* work, float* out)
                 vr[LANE_SUB[r]] = u[r].r;
                 vi[LANE_SUB[r]] = u[r].i;
             }
-            float* b = work + plan->rev[k0];
+            float* b = work + og[1];
             transpose_scatter8_avx(vr, b, off, L <= 16);
             transpose_scatter8_avx(vi, b + 8, off, L <= 16);
         }
@@ -3313,15 +3439,175 @@ XFFT_DEF void xfft_inverse_avx(void* p, const float* in, float* out)
             store_rev(zim + M - k0 - 8, _mm256_sub_ps(br, ai));
         }
     }
-    zinv_avx(plan, work, out);
+    zinv_avx(plan, work, out, 0, 0);
 }
 
 XFFT_DEF const char* xfft_tell_avx(void) { return "avx"; }
 
+// Twiddles for cfft32_avx, (re, im) rows of 8 lanes: W_32^(b*c) for c = 1..3 (lane b), then W_8^i for i = 1..3 in
+// the upper half (lower half 1)
+static const _Alignas(32) float CFFT32_TW_AVX[12][8] = {
+    {1.0f, 0.98078528f, 0.923879533f, 0.831469612f, 0.707106781f, 0.555570233f, 0.382683432f, 0.195090322f},
+    {0.0f, -0.195090322f, -0.382683432f, -0.555570233f, -0.707106781f, -0.831469612f, -0.923879533f, -0.98078528f},
+    {1.0f, 0.923879533f, 0.707106781f, 0.382683432f, 0.0f, -0.382683432f, -0.707106781f, -0.923879533f},
+    {0.0f, -0.382683432f, -0.707106781f, -0.923879533f, -1.0f, -0.923879533f, -0.707106781f, -0.382683432f},
+    {1.0f, 0.831469612f, 0.382683432f, -0.195090322f, -0.707106781f, -0.98078528f, -0.923879533f, -0.555570233f},
+    {0.0f, -0.555570233f, -0.923879533f, -0.98078528f, -0.707106781f, -0.195090322f, 0.382683432f, 0.831469612f},
+    {1.0f, 1.0f, 1.0f, 1.0f, 0.707106781f, 0.707106781f, 0.707106781f, 0.707106781f},
+    {0.0f, 0.0f, 0.0f, 0.0f, -0.707106781f, -0.707106781f, -0.707106781f, -0.707106781f},
+    {1.0f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f},
+    {0.0f, 0.0f, 0.0f, 0.0f, -1.0f, -1.0f, -1.0f, -1.0f},
+    {1.0f, 1.0f, 1.0f, 1.0f, -0.707106781f, -0.707106781f, -0.707106781f, -0.707106781f},
+    {0.0f, 0.0f, 0.0f, 0.0f, -0.707106781f, -0.707106781f, -0.707106781f, -0.707106781f},
+};
+
+// Complex FFT of 32 points in registers (in == out allowed: everything is loaded first), as cfft32_avx2. j = 8a + b,
+// k = c + 4d: radix 4 over a, lane-parallel (lane b), twiddle W_32^(b*c), then the 8-point DFTs over b for each c: 4x4
+// transposes put (b = i | b = i + 4) in the two halves of vector i, lanes c; a radix 2 across halves (DIF), W_8^i on
+// the upper half, then radix 4 over i, lane-parallel, leaves bins 8m..8m+7 in natural order in vector m. inv: conj
+// twiddles
+FI void cfft32_avx(const float* in, float* out, int inv)
+{
+    cv_x86 v[4];
+    for (int a = 0; a < 4; a++)
+        load_il8(in + 16 * a, &v[a].r, &v[a].i);
+    bfly4_avx(&v[0], &v[1], &v[2], &v[3], inv);
+    for (int c = 1; c < 4; c++)
+    {
+        __m256 wr = _mm256_load_ps(CFFT32_TW_AVX[2 * c - 2]), wi = _mm256_load_ps(CFFT32_TW_AVX[2 * c - 1]);
+        v[c] = inv ? cv_mulc_avx(v[c], wr, wi) : cv_mul_avx(v[c], wr, wi);
+    }
+    __m256 vr[4] = {v[0].r, v[1].r, v[2].r, v[3].r}, vi[4] = {v[0].i, v[1].i, v[2].i, v[3].i};
+    transpose4x2(vr);
+    transpose4x2(vi);
+    __m256 sg = _mm256_setr_ps(0, 0, 0, 0, -0.0f, -0.0f, -0.0f, -0.0f);
+    for (int i = 0; i < 4; i++)
+    {
+        // (y_i | y_i+4) -> (y_i + y_i+4 | y_i - y_i+4): swapped halves + the upper half negated
+        __m256 sr = _mm256_permute2f128_ps(vr[i], vr[i], 1), si = _mm256_permute2f128_ps(vi[i], vi[i], 1);
+        v[i] = (cv_x86){_mm256_add_ps(_mm256_xor_ps(vr[i], sg), sr), _mm256_add_ps(_mm256_xor_ps(vi[i], sg), si)};
+        if (i)
+        {
+            __m256 wr = _mm256_load_ps(CFFT32_TW_AVX[4 + 2 * i]), wi = _mm256_load_ps(CFFT32_TW_AVX[5 + 2 * i]);
+            v[i] = inv ? cv_mulc_avx(v[i], wr, wi) : cv_mul_avx(v[i], wr, wi);
+        }
+    }
+    bfly4_avx(&v[0], &v[1], &v[2], &v[3], inv);
+    for (int m = 0; m < 4; m++)
+        store_il8_avx(out + 16 * m, v[m].r, v[m].i);
+}
+
+// Complex FFT of 64 points in registers (in == out allowed: everything is loaded first), as cfft64_avx2. j = 8a + b,
+// k = c + 8d: radix 8 over a, lane-parallel (lane l holds b = LANE_SUB[l], as cv_ld_il loads it), twiddle W_64^(b*c),
+// an 8x8 transpose (rows fed in LANE_SUB order, so lane i then holds c = LANE_SUB[i]), radix 8 over b, lane-parallel:
+// vector d holds bins 8d + c in LANE_SUB lane order, which cv_st_il stores in natural order. The twiddles are the
+// plan's cross-lane ones: at L = 8 (real n = 128) rev[k] = 16k and xtw at 16c, lane l is W_64^(LANE_SUB[l] * c).
+// One copy for both directions: the unnormalised inverse is conj(F(conj(x))), the sign flips as xors with a mask
+// that's 0 for the forward (no branches).
+NI void cfft64_avx(const float* xtw, const float* in, float* out, int inv)
+{
+    cv_x86 v[8];
+    __m256 sg = inv ? _mm256_set1_ps(-0.0f) : _mm256_setzero_ps();
+    for (int a = 0; a < 8; a++)
+    {
+        v[a]   = cv_ld_il(in + 16 * a);
+        v[a].i = _mm256_xor_ps(v[a].i, sg);
+    }
+    bfly8_avx(v, 0);
+    for (int c = 1; c < 8; c++)
+        v[c] = cv_mul_avx(v[c], _mm256_load_ps(xtw + 16 * c), _mm256_load_ps(xtw + 16 * c + 8));
+    __m256 tr[8], ti[8];
+    for (int i = 0; i < 8; i++)
+    {
+        tr[i] = v[LANE_SUB[i]].r;
+        ti[i] = v[LANE_SUB[i]].i;
+    }
+    transpose4x2(tr);
+    transpose4x2(tr + 4);
+    transpose4x2(ti);
+    transpose4x2(ti + 4);
+    // Vector m lane i = row i lane m: the 4x4 blocks' halves. Then u[b] = row of b, rows in LANE_SUB order
+    for (int i = 0; i < 4; i++)
+    {
+        v[LANE_SUB[i]]     = (cv_x86){_mm256_permute2f128_ps(tr[i], tr[i + 4], 0x20),
+                                      _mm256_permute2f128_ps(ti[i], ti[i + 4], 0x20)};
+        v[LANE_SUB[i + 4]] = (cv_x86){_mm256_permute2f128_ps(tr[i], tr[i + 4], 0x31),
+                                      _mm256_permute2f128_ps(ti[i], ti[i + 4], 0x31)};
+    }
+    bfly8_avx(v, 0);
+    for (int d = 0; d < 8; d++)
+        cv_st_il(out + 16 * d, (cv_x86){v[d].r, _mm256_xor_ps(v[d].i, sg)});
+}
+
+// Twiddles for cfft16_avx, (re, im) rows of 8 lanes: W_16^(b*c) at lane b of half c (c = 0, 1), then of c = 2, 3
+static const _Alignas(32) float CFFT16_TW_AVX[4][8] = {
+    {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 0.923879533f, 0.707106781f, 0.382683432f},
+    {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, -0.382683432f, -0.707106781f, -0.923879533f},
+    {1.0f, 0.707106781f, 0.0f, -0.707106781f, 1.0f, 0.382683432f, -0.707106781f, -0.923879533f},
+    {0.0f, -0.707106781f, -1.0f, -0.707106781f, 0.0f, -0.923879533f, -0.707106781f, 0.382683432f},
+};
+
+// Forward 4-point DFTs on vectors whose 128-bit halves are the 4 inputs: p = (u0 | u2), q = (u1 | u3) become
+// p = (U0 | U1), q = (U2 | U3), lane-parallel. hi negates the upper half
+FI void bfly4_halves_avx(cv_x86* p, cv_x86* q, __m256 hi)
+{
+    // (u0 | u2) -> (u0 + u2 | u0 - u2): swapped halves + the upper half negated
+    cv_x86 e = {_mm256_add_ps(_mm256_xor_ps(p->r, hi), _mm256_permute2f128_ps(p->r, p->r, 1)),
+                _mm256_add_ps(_mm256_xor_ps(p->i, hi), _mm256_permute2f128_ps(p->i, p->i, 1))}; // (t0 | t1)
+    cv_x86 f = {_mm256_add_ps(_mm256_xor_ps(q->r, hi), _mm256_permute2f128_ps(q->r, q->r, 1)),
+                _mm256_add_ps(_mm256_xor_ps(q->i, hi), _mm256_permute2f128_ps(q->i, q->i, 1))}; // (t2 | t3)
+    // (t2 | -i t3)
+    f  = (cv_x86){_mm256_blend_ps(f.r, f.i, 0xF0), _mm256_xor_ps(_mm256_blend_ps(f.i, f.r, 0xF0), hi)};
+    *p = cv_add_x86(e, f);
+    *q = cv_sub_x86(e, f);
+}
+
+// Complex FFT of 16 points in registers (in == out allowed: everything is loaded first), the AVX copy of cfft16_x86
+// (plain C there, which clang vectorises badly without FMA). j = 4a + b, k = c + 4d: radix 4 over a (lane b, the
+// loads put (a = 0 | a = 2) and (1 | 3) in the halves), twiddle W_16^(b*c), two 4x4 transposes of the four (c | c')
+// rows into (b = 0 | 2) and (1 | 3), lanes c, then radix 4 over b: vector m holds bins 8m..8m+7 in natural order.
+// One copy for both directions: the unnormalised inverse is conj(F(conj(x))), as cfft64_avx.
+NI void cfft16_avx(const float* in, float* out, int inv)
+{
+    __m256 sg = inv ? _mm256_set1_ps(-0.0f) : _mm256_setzero_ps();
+    __m256 hi = _mm256_setr_ps(0, 0, 0, 0, -0.0f, -0.0f, -0.0f, -0.0f);
+    cv_x86 p, q;
+    {
+        __m256 a = _mm256_insertf128_ps(_mm256_castps128_ps256(_mm_loadu_ps(in)), _mm_loadu_ps(in + 16), 1);
+        __m256 b = _mm256_insertf128_ps(_mm256_castps128_ps256(_mm_loadu_ps(in + 4)), _mm_loadu_ps(in + 20), 1);
+        __m256 c = _mm256_insertf128_ps(_mm256_castps128_ps256(_mm_loadu_ps(in + 8)), _mm_loadu_ps(in + 24), 1);
+        __m256 d = _mm256_insertf128_ps(_mm256_castps128_ps256(_mm_loadu_ps(in + 12)), _mm_loadu_ps(in + 28), 1);
+        p = (cv_x86){_mm256_shuffle_ps(a, b, 0x88), _mm256_xor_ps(_mm256_shuffle_ps(a, b, 0xDD), sg)}; // x0..3 | x8..11
+        q = (cv_x86){_mm256_shuffle_ps(c, d, 0x88), _mm256_xor_ps(_mm256_shuffle_ps(c, d, 0xDD), sg)}; // x4..7 | x12..15
+    }
+    bfly4_halves_avx(&p, &q, hi); // rows c: p = (Y0 | Y1), q = (Y2 | Y3), lanes b
+    p = cv_mul_avx(p, _mm256_load_ps(CFFT16_TW_AVX[0]), _mm256_load_ps(CFFT16_TW_AVX[1]));
+    q = cv_mul_avx(q, _mm256_load_ps(CFFT16_TW_AVX[2]), _mm256_load_ps(CFFT16_TW_AVX[3]));
+    {
+        __m256 v[2][2] = {{p.r, q.r}, {p.i, q.i}};
+        for (int k = 0; k < 2; k++)
+        {
+            __m256 a  = _mm256_permute2f128_ps(v[k][0], v[k][1], 0x20); // rows 0 | 2
+            __m256 b  = _mm256_permute2f128_ps(v[k][0], v[k][1], 0x31); // rows 1 | 3
+            __m256 t0 = _mm256_unpacklo_ps(a, b), t1 = _mm256_unpackhi_ps(a, b);
+            __m256 x  = _mm256_permute2f128_ps(t0, t1, 0x20); // rows 0, 1 of columns 0, 1 | 2, 3
+            __m256 y  = _mm256_permute2f128_ps(t0, t1, 0x31); // rows 2, 3
+            v[k][0]   = _mm256_shuffle_ps(x, y, 0x44);        // columns 0 | 2
+            v[k][1]   = _mm256_shuffle_ps(x, y, 0xEE);        // columns 1 | 3
+        }
+        p = (cv_x86){v[0][0], v[1][0]};
+        q = (cv_x86){v[0][1], v[1][1]};
+    }
+    bfly4_halves_avx(&p, &q, hi);
+    store_il8_avx(out, p.r, _mm256_xor_ps(p.i, sg));
+    store_il8_avx(out + 16, q.r, _mm256_xor_ps(q.i, sg));
+}
+
 // Complex FFT of n: the real plan of 2n runs exactly this as its steps 1 and 2 (zfwd_avx, zinv_avx), so a complex
-// plan is that plan. Its real split twiddles (rtw) go unused. n = 16 (real n = 32, dense32) is cfft16_x86.
-XFFT_DEF size_t xfft_complex_mem_size_avx(int n) { return layout_x86(2 * n, 0); }
-XFFT_DEF void*  xfft_complex_init_avx(void* mem, int n) { return init_x86(mem, 2 * n); }
+// plan is that plan. Its real split twiddles (rtw) go unused. n = 16 (real n = 32, dense32) is cfft16_avx, n = 32 is
+// cfft32_avx, n = 64 cfft64_avx, so the cross passes only see L >= 16 here.
+XFFT_DEF size_t xfft_complex_mem_size_avx(int n) { return mem_size_avx(2 * n); }
+XFFT_DEF void*  xfft_complex_init_avx(void* mem, int n) { return init_avx(mem, 2 * n); }
 
 XFFT_DEF void xfft_complex_forward_avx(void* p, const float* in, float* out)
 {
@@ -3329,19 +3615,14 @@ XFFT_DEF void xfft_complex_forward_avx(void* p, const float* in, float* out)
     XFFT_ASSERT(XFFT_IS_ALIGNED(in));
     XFFT_ASSERT(XFFT_IS_ALIGNED(out));
     const Plan_x86* plan = p;
-    int             M = plan->n / 2, L = plan->n / 16;
-    if (M == 16)
-    {
-        cfft16_x86(in, out, 0);
-        return;
-    }
-    // Lane workspace as in xfft_forward_avx. Z (split re / im) is then interleaved into out
-    float* work = L < 8 ? plan->work : out;
-    zfwd_avx(plan, in, work);
-    const float* zre = plan->zbuf;
-    const float* zim = plan->zbuf + M;
-    for (ptrdiff_t k0 = 0; k0 < M; k0 += 8)
-        store_il8_avx(out + 2 * k0, _mm256_load_ps(zre + k0), _mm256_load_ps(zim + k0));
+    if (plan->n == 32)
+        cfft16_avx(in, out, 0);
+    else if (plan->n == 64)
+        cfft32_avx(in, out, 0);
+    else if (plan->n == 128)
+        cfft64_avx(plan->xtw, in, out, 0);
+    else // Lane FFTs in zbuf (2M floats, exactly the lane workspace), the cross pass writes interleaved Z to out
+        zfwd_avx(plan, in, plan->zbuf, out, 1);
 }
 
 XFFT_DEF void xfft_complex_inverse_avx(void* p, const float* in, float* out)
@@ -3350,24 +3631,15 @@ XFFT_DEF void xfft_complex_inverse_avx(void* p, const float* in, float* out)
     XFFT_ASSERT(XFFT_IS_ALIGNED(in));
     XFFT_ASSERT(XFFT_IS_ALIGNED(out));
     const Plan_x86* plan = p;
-    int             M = plan->n / 2, L = plan->n / 16;
-    if (M == 16)
-    {
-        cfft16_x86(in, out, 1);
-        return;
-    }
-    // Z split into zbuf first (which also makes in == out safe), then the inverse as in xfft_inverse_avx
-    float* work = L < 8 ? plan->work : out;
-    float* zre  = plan->zbuf;
-    float* zim  = plan->zbuf + M;
-    for (ptrdiff_t k0 = 0; k0 < M; k0 += 8)
-    {
-        __m256 re, im;
-        load_il8(in + 2 * k0, &re, &im);
-        _mm256_store_ps(zre + k0, re);
-        _mm256_store_ps(zim + k0, im);
-    }
-    zinv_avx(plan, work, out);
+    if (plan->n == 32)
+        cfft16_avx(in, out, 1);
+    else if (plan->n == 64)
+        cfft32_avx(in, out, 1);
+    else if (plan->n == 128)
+        cfft64_avx(plan->xtw, in, out, 1);
+    else // The cross pass reads interleaved 'in' and scatters into zbuf, the lanes run there and the last stage writes
+         // out. All of 'in' is read before 'out' is written, so in == out is safe
+        zinv_avx(plan, plan->zbuf, out, in, 1);
 }
 
 #elif !defined(XFFT_NO_STUBS) // No AVX (or XFFT_DISABLE_AVX): planning fails
