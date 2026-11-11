@@ -3308,16 +3308,33 @@ FI void zinv_avx(const Plan_x86* plan, float* work, float* out, const float* cin
         // Groups in order of rev[k0] (init_avx), not k0: each group scatters to work + rev[k0] + off[i], so the 8
         // writes become 8 sequential streams, and the random access moves to the row reads, as in the forward
         // (xfft_avx2 cx6: above L1 the scattered store misses cost 2.5x the forward's cross pass)
-        const int32_t* order = (const int32_t*)plan->mat;
-        for (const int32_t* og = order; og < order + 2 * ((L + 7) / 8); og += 2)
+        const int32_t* order  = (const int32_t*)plan->mat;
+        const int32_t* og_end = order + 2 * ((L + 7) / 8);
+        if (cplx)
         {
-            int    k0 = og[0];
-            cv_x86 u[8];
-            if (cplx)
+            // Software-pipelined by one group: group g's transpose + scatter (from pend) first, then group g+1's row
+            // loads and radix 8, which don't depend on it. Complex 256..4096 inv -2..-4%; real gained nothing
+            _Alignas(32) float pend[128]; // vr[0..7], vi[0..7] of the group in flight
+            float*             b = 0;
+            for (const int32_t* og = order;; og += 2)
             {
+                if (b)
+                {
+                    __m256 vr[8], vi[8];
+                    for (int r = 0; r < 8; r++)
+                    {
+                        vr[r] = _mm256_load_ps(pend + 8 * r);
+                        vi[r] = _mm256_load_ps(pend + 64 + 8 * r);
+                    }
+                    transpose_scatter8_avx(vr, b, off, L <= 16);
+                    transpose_scatter8_avx(vi, b + 8, off, L <= 16);
+                }
+                if (og == og_end)
+                    break;
                 // Interleaved rows at cin + 2 * (k0 + L*q), deinterleaved as cv_ld_il does, so lanes hold bins in
                 // LANE_SUB order (as the forward)
-                const char *c0 = (const char*)(cin + 2 * k0), *c4 = c0 + 4 * r1;
+                cv_x86      u[8];
+                const char *c0 = (const char*)(cin + 2 * og[0]), *c4 = c0 + 4 * r1;
                 CROW_LD_IL_AVX(u[0], c0, r1, 0);
                 CROW_LD_IL_AVX(u[1], c0, r1, 1);
                 CROW_LD_IL_AVX(u[2], c0, r1, 2);
@@ -3326,9 +3343,22 @@ FI void zinv_avx(const Plan_x86* plan, float* work, float* out, const float* cin
                 CROW_LD_IL_AVX(u[5], c4, r1, 1);
                 CROW_LD_IL_AVX(u[6], c4, r1, 2);
                 CROW_LD_IL_AVX(u[7], c4, r3, 1);
+                bfly8_avx(u, 1);
+                for (int r = 0; r < 8; r++)
+                {
+                    _mm256_store_ps(pend + 8 * LANE_SUB[r], u[r].r);
+                    _mm256_store_ps(pend + 64 + 8 * LANE_SUB[r], u[r].i);
+                }
+                b = work + og[1];
+                // Without this clang keeps pend in registers (rotating the loop, with spills): no gain
+                __asm__ volatile("" ::: "memory");
             }
-            else
+        }
+        else
+            for (const int32_t* og = order; og < og_end; og += 2)
             {
+                int    k0 = og[0];
+                cv_x86 u[8];
                 const char *b0 = (const char*)(zre + k0), *b2 = b0 + 2 * l1, *b7 = b0 + 7 * l1;
                 ZROW_LD0(u[0].r, b0);
                 ZROW_LD(u[1].r, b0, l1, 1);
@@ -3346,18 +3376,17 @@ FI void zinv_avx(const Plan_x86* plan, float* work, float* out, const float* cin
                 ZROW_LD(u[5].i, b7, l3, 2);
                 ZROW_LD(u[6].i, b2, l3, 4);
                 ZROW_LD(u[7].i, b7, l1, 8);
+                bfly8_avx(u, 1);
+                __m256 vr[8], vi[8];
+                for (int r = 0; r < 8; r++)
+                {
+                    vr[LANE_SUB[r]] = u[r].r;
+                    vi[LANE_SUB[r]] = u[r].i;
+                }
+                float* b = work + og[1];
+                transpose_scatter8_avx(vr, b, off, L <= 16);
+                transpose_scatter8_avx(vi, b + 8, off, L <= 16);
             }
-            bfly8_avx(u, 1);
-            __m256 vr[8], vi[8];
-            for (int r = 0; r < 8; r++)
-            {
-                vr[LANE_SUB[r]] = u[r].r;
-                vi[LANE_SUB[r]] = u[r].i;
-            }
-            float* b = work + og[1];
-            transpose_scatter8_avx(vr, b, off, L <= 16);
-            transpose_scatter8_avx(vi, b + 8, off, L <= 16);
-        }
     }
     {
         // 1. Inverse lane FFTs (DIT): work -> interleaved output, natural order
