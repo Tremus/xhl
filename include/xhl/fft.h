@@ -1880,9 +1880,6 @@ static void*  init_avx2(void* mem, int n)
     return plan;
 }
 
-XFFT_DEF size_t xfft_mem_size_avx2(int n) { return mem_size_avx2(n); }
-XFFT_DEF void*  xfft_init_avx2(void* mem, int n) { return init_avx2(mem, n); }
-
 // a * w
 FI cv_x86 cv_mul_avx2(cv_x86 a, __m256 wr, __m256 wi)
 {
@@ -2342,6 +2339,305 @@ FI void zfwd_avx2(const Plan_x86* plan, const float* in, float* work, float* cou
     }
 }
 
+// Complex FFT of 128 <= N <= 1024 as two passes over interleaved data, N = R1 x R2 (n = R2 n1 + n2, k = k1 + R1 k2):
+// a port of xfft_avx's cz_*_avx (its NOTES.md cx11-cx13), with FMA in the complex multiply (fmaddsub) and in a +- j b.
+// A ymm holds 4 interleaved complex values of 4 independent butterfly instances, so there are no (de)interleaves and
+// no 8x8 transposes: the one change of lane orientation is the transposing store at the end of pass 1.
+// Pass 1, in -> mid: per 4 instances n2, a radix-R1 DFT over n1 (x[R2 n1 + n2]), twiddle W_N^(n2 k1) per lane, then a
+// transposing store to mid[k1 + R1 n2]. Pass 2, mid -> out (in place when mid == out): per 4 instances k1, a radix-R2
+// DFT over n2 (mid[k1 + R1 n2]), X[k1 + R1 k2] with plain stores. A radix R = 8B (B = 1, 2, 4) runs B DFT8s over p of
+// element Bp + q (stage A), W_R^(q k'), then 8 DFT_Bs over q: X[k' + 8m]. One copy of each pass per direction.
+
+// After the complex plan's shared layout (mem_size_avx2(2N)), per direction: W_R^(q k) (q < R/8, k < 8) as (wr, wi) ymm
+// for R = 16, 32, then the per-lane pass-1 twiddles [g < R2/4][k1 < R1] as (wr, wr, ...) / (wi, wi, ...) ymm
+#define CZ_WR_FLOATS_AVX2 ((16 + 32) * 16)
+static int    cz_dir_floats_avx2(int N) { return CZ_WR_FLOATS_AVX2 + 4 * N; }
+static size_t cz_bytes_avx2(int N) { return N >= 128 && N <= 1024 ? ALIGN_UP(2 * cz_dir_floats_avx2(N) * sizeof(float)) : 0; }
+static int    cz_r1_avx2(int N) { return N <= 256 ? 16 : 32; }
+static float* cz_tables_avx2(const Plan_x86* plan) { return (float*)((char*)plan + mem_size_avx2(plan->n)); }
+FI const float* cz_wr_avx2(const float* w, int R) { return w + (R == 16 ? 0 : 16 * 16); }
+
+FI __m256 cz_swap_avx2(__m256 a) { return _mm256_permute_ps(a, 0xB1); }
+// a * w for 4 interleaved complex values, w as (wr, wr) and (wi, wi) pairs
+FI __m256 cz_mul_avx2(__m256 a, __m256 wr, __m256 wi)
+{
+    return _mm256_fmaddsub_ps(a, wr, _mm256_mul_ps(cz_swap_avx2(a), wi));
+}
+FI __m256 cz_mul_ld_avx2(__m256 a, const float* w) { return cz_mul_avx2(a, _mm256_load_ps(w), _mm256_load_ps(w + 8)); }
+// p = a + j b, m = a - j b with j = W_4 (-i forward, +i inverse). -i b = (bi, -br) = swap(b) * (1, -1): two FMAs
+FI void cz_pmj_avx2(__m256 a, __m256 b, int inv, __m256* p, __m256* m)
+{
+    __m256 s = inv ? _mm256_setr_ps(-1, 1, -1, 1, -1, 1, -1, 1) : _mm256_setr_ps(1, -1, 1, -1, 1, -1, 1, -1);
+    __m256 t = cz_swap_avx2(b);
+    *p       = _mm256_fmadd_ps(t, s, a);
+    *m       = _mm256_fnmadd_ps(t, s, a);
+}
+FI void cz_dft4_avx2(__m256* x0, __m256* x1, __m256* x2, __m256* x3, int inv)
+{
+    __m256 t0 = _mm256_add_ps(*x0, *x2), t1 = _mm256_sub_ps(*x0, *x2);
+    __m256 t2 = _mm256_add_ps(*x1, *x3), t3 = _mm256_sub_ps(*x1, *x3);
+    *x0       = _mm256_add_ps(t0, t2);
+    *x2       = _mm256_sub_ps(t0, t2);
+    cz_pmj_avx2(t1, t3, inv, x1, x3);
+}
+// Natural order in and out
+FI void cz_dft8_avx2(__m256* x, int inv)
+{
+    cz_dft4_avx2(&x[0], &x[2], &x[4], &x[6], inv);
+    cz_dft4_avx2(&x[1], &x[3], &x[5], &x[7], inv);
+    __m256 e0 = x[0], e1 = x[2], e2 = x[4], e3 = x[6], o0 = x[1], o1 = x[3], o2 = x[5], o3 = x[7];
+    __m256 h = _mm256_set1_ps(SQRT1_2_F), nh = _mm256_set1_ps(-SQRT1_2_F), sh = inv ? h : nh;
+    o1   = cz_mul_avx2(o1, h, sh);  // W_8 = (h, -+h)
+    o3   = cz_mul_avx2(o3, nh, sh); // W_8^3 = (-h, -+h)
+    x[0] = _mm256_add_ps(e0, o0);
+    x[4] = _mm256_sub_ps(e0, o0);
+    x[1] = _mm256_add_ps(e1, o1);
+    x[5] = _mm256_sub_ps(e1, o1);
+    cz_pmj_avx2(e2, o2, inv, &x[2], &x[6]); // W_8^2 = j
+    x[3] = _mm256_add_ps(e3, o3);
+    x[7] = _mm256_sub_ps(e3, o3);
+}
+// DFT of size B over y[0..B-1], natural order
+FI void cz_dftb_avx2(__m256* y, int B, int inv)
+{
+    if (B == 2)
+    {
+        __m256 t = y[0];
+        y[0]     = _mm256_add_ps(t, y[1]);
+        y[1]     = _mm256_sub_ps(t, y[1]);
+    }
+    else if (B == 4)
+        cz_dft4_avx2(&y[0], &y[1], &y[2], &y[3], inv);
+    else if (B == 8)
+        cz_dft8_avx2(y, inv);
+}
+
+// Element loads through inline asm: with a runtime stride clang precomputes one offset per element, spills them and
+// reloads them in the loop (complex 1024 ~3270 vs ~3070 cycles with a literal stride). Address = base + idx * sc (sc = 0: base
+// only). Not volatile and no memory clobber, so clang still schedules them: safe because no pass loads an address it
+// stored in an earlier iteration (pass 2 runs in place, but each iteration reads and writes only its own 4 columns)
+#define CZ_ADDR_AVX2(sc) CZ_ADDR_AVX2_##sc
+#define CZ_ADDR_AVX2_0   "{(%1)|[%1]}"
+#define CZ_ADDR_AVX2_1   "{(%1,%2,1)|[%1+%2]}"
+#define CZ_ADDR_AVX2_2   "{(%1,%2,2)|[%1+%2*2]}"
+#define CZ_LD_AVX2(v, base, idx, sc)                                                                                   \
+    __asm__("{vmovaps |vmovaps %0, }" CZ_ADDR_AVX2(sc) "{, %0|}" : "=x"(v) : "r"(base), "r"(idx))
+// 8 vectors at b + j * i1 bytes (j < 8), i3 = 3 * i1
+FI void cz_ld8_avx2(__m256* x, const char* b, ptrdiff_t i1, ptrdiff_t i3)
+{
+    const char* b4 = b + 4 * i1;
+    CZ_LD_AVX2(x[0], b, i1, 0);
+    CZ_LD_AVX2(x[1], b, i1, 1);
+    CZ_LD_AVX2(x[2], b, i1, 2);
+    CZ_LD_AVX2(x[3], b, i3, 1);
+    CZ_LD_AVX2(x[4], b4, i1, 0);
+    CZ_LD_AVX2(x[5], b4, i1, 1);
+    CZ_LD_AVX2(x[6], b4, i1, 2);
+    CZ_LD_AVX2(x[7], b4, i3, 1);
+}
+
+// Stores the same way (volatile, since they have no outputs, but no memory clobber: as the loads)
+#define CZ_ST_AVX2(v, base, idx, sc)                                                                                   \
+    __asm__ volatile("{vmovaps %0, |vmovaps }" CZ_ADDR_AVX2(sc) "{|, %0}" ::"x"(v), "r"(base), "r"(idx))
+// y[j] to b + j * i1 bytes for j < B (B = 1, 2, 4, 8), i3 = 3 * i1
+FI void cz_stb_avx2(const __m256* y, char* b, ptrdiff_t i1, ptrdiff_t i3, int B)
+{
+    CZ_ST_AVX2(y[0], b, i1, 0);
+    if (B >= 2)
+        CZ_ST_AVX2(y[1], b, i1, 1);
+    if (B >= 4)
+    {
+        CZ_ST_AVX2(y[2], b, i1, 2);
+        CZ_ST_AVX2(y[3], b, i3, 1);
+    }
+    if (B == 8)
+    {
+        char* b4 = b + 4 * i1;
+        CZ_ST_AVX2(y[4], b4, i1, 0);
+        CZ_ST_AVX2(y[5], b4, i1, 1);
+        CZ_ST_AVX2(y[6], b4, i1, 2);
+        CZ_ST_AVX2(y[7], b4, i3, 1);
+    }
+}
+
+// Stage A of a radix-R pass (R = 8B, B a literal) on 4 instances, element n at src + n * es floats: S[8q + k'] = W_R^(q k') A_q[k']
+FI void cz_stage_a_avx2(const float* src, ptrdiff_t es, __m256* S, const float* wR, int R, int inv)
+{
+    int       B  = R / 8;
+    ptrdiff_t i1 = 4 * B * es, i3 = 3 * i1; // Bytes between p and p + 1
+    _Pragma("clang loop unroll(full)") for (int q = 0; q < B; q++)
+    {
+        __m256 x[8];
+        cz_ld8_avx2(x, (const char*)(src + q * es), i1, i3);
+        cz_dft8_avx2(x, inv);
+        _Pragma("clang loop unroll(full)") for (int k = 0; k < 8; k++)
+            S[8 * q + k] = q && k ? cz_mul_ld_avx2(x[k], wR + (8 * q + k) * 16) : x[k];
+    }
+    __asm__ volatile("" ::: "memory");
+}
+
+FI void cz_pass1_body_avx2(const float* in, float* mid, int N, const float* w, int R1, int inv)
+{
+    int          B = R1 / 8, R2 = N / R1;
+    ptrdiff_t    es = 2 * (ptrdiff_t)R2, rs = 2 * (ptrdiff_t)R1; // Element stride in 'in', row stride in 'mid'
+    const float* wR = cz_wr_avx2(w, R1);
+    for (int g = 0; g < R2 / 4; g++)
+    {
+        _Alignas(32) __m256 S[64];
+        cz_stage_a_avx2(in + 8 * g, es, S, wR, R1, inv);
+        const float* twg = w + CZ_WR_FLOATS_AVX2 + (ptrdiff_t)g * R1 * 16;
+        float*       r0  = mid + 4 * g * rs;
+        _Pragma("clang loop unroll(full)") for (int c = 0; c < 4; c++) // k' = 2c, 2c + 1: pairs (k1, k1 + 1) to store
+        {
+            __m256 y[2][8];
+            _Pragma("clang loop unroll(full)") for (int d = 0; d < 2; d++)
+            {
+                int k = 2 * c + d;
+                for (int q = 0; q < B; q++)
+                    y[d][q] = S[8 * q + k];
+                cz_dftb_avx2(y[d], B, inv);
+                _Pragma("clang loop unroll(full)") for (int m = 0; m < B; m++)
+                    if (k + 8 * m)
+                        y[d][m] = cz_mul_ld_avx2(y[d][m], twg + (k + 8 * m) * 16);
+            }
+            _Pragma("clang loop unroll(full)") for (int m = 0; m < B; m++)
+            {
+                __m256 lo = _mm256_castpd_ps(_mm256_unpacklo_pd(_mm256_castps_pd(y[0][m]), _mm256_castps_pd(y[1][m])));
+                __m256 hi = _mm256_castpd_ps(_mm256_unpackhi_pd(_mm256_castps_pd(y[0][m]), _mm256_castps_pd(y[1][m])));
+                float* r  = r0 + 2 * (2 * c + 8 * m); // Row n2 = 4g + l at r + l * rs
+                _mm_store_ps(r, _mm256_castps256_ps128(lo));
+                _mm_store_ps(r + rs, _mm256_castps256_ps128(hi));
+                _mm_store_ps(r + 2 * rs, _mm256_extractf128_ps(lo, 1));
+                _mm_store_ps(r + 3 * rs, _mm256_extractf128_ps(hi, 1));
+            }
+        }
+    }
+}
+
+FI void cz_pass2_body_avx2(const float* mid, float* out, int N, const float* w, int R2, int inv)
+{
+    int          B = R2 / 8, R1 = N / R2;
+    ptrdiff_t    es = 2 * (ptrdiff_t)R1, i8 = 32 * es, i24 = 3 * i8; // Bytes between k2 and k2 + 8
+    const float* wR = cz_wr_avx2(w, R2);
+    for (int h = 0; h < R1 / 4; h++)
+    {
+        _Alignas(32) __m256 S[64];
+        cz_stage_a_avx2(mid + 8 * h, es, S, wR, R2, inv);
+        _Pragma("clang loop unroll(full)") for (int k = 0; k < 8; k++)
+        {
+            __m256 y[8];
+            for (int q = 0; q < B; q++)
+                y[q] = S[8 * q + k];
+            cz_dftb_avx2(y, B, inv);
+            cz_stb_avx2(y, (char*)(out + 8 * h + k * es), i8, i24, B); // X[k1 + R1 (k + 8m)]
+        }
+    }
+}
+
+#define CZ_PASS1_AVX2(inv)                                                                                             \
+    if (R1 == 16)                                                                                                      \
+        cz_pass1_body_avx2(in, mid, N, w, 16, inv);                                                                    \
+    else                                                                                                               \
+        cz_pass1_body_avx2(in, mid, N, w, 32, inv)
+#define CZ_PASS2_AVX2(inv)                                                                                             \
+    if (R2 == 8)                                                                                                       \
+        cz_pass2_body_avx2(mid, out, N, w, 8, inv);                                                                    \
+    else if (R2 == 16)                                                                                                 \
+        cz_pass2_body_avx2(mid, out, N, w, 16, inv);                                                                   \
+    else                                                                                                               \
+        cz_pass2_body_avx2(mid, out, N, w, 32, inv)
+NI LANE_ABI_AVX2 void cz_pass1_fwd_avx2(const float* in, float* mid, int N, int R1, const float* w) { CZ_PASS1_AVX2(0); }
+NI LANE_ABI_AVX2 void cz_pass1_inv_avx2(const float* in, float* mid, int N, int R1, const float* w) { CZ_PASS1_AVX2(1); }
+NI LANE_ABI_AVX2 void cz_pass2_fwd_avx2(const float* mid, float* out, int N, int R2, const float* w) { CZ_PASS2_AVX2(0); }
+NI LANE_ABI_AVX2 void cz_pass2_inv_avx2(const float* mid, float* out, int N, int R2, const float* w) { CZ_PASS2_AVX2(1); }
+
+// Fills cz_tables_avx2(plan) for a complex FFT of N (plan->n = 2N, complex or real)
+static void cz_init_avx2(Plan_x86* plan, int n)
+{
+    // The two-pass core's tables (cz_tables_avx2)
+    int    R1 = cz_r1_avx2(n), R2 = n / R1;
+    float* t  = cz_tables_avx2(plan);
+    for (int inv = 0; inv < 2; inv++)
+    {
+        float  sg = inv ? 1.0f : -1.0f;
+        float* w  = t + inv * cz_dir_floats_avx2(n);
+        for (int R = 16; R <= 32; R *= 2)
+            for (int i = 0; i < R; i++) // i = 8q + k
+            {
+                float c, s, *p = (float*)cz_wr_avx2(w, R) + 16 * i;
+                unit_cs((i / 8) * (i % 8), R, &c, &s);
+                for (int l = 0; l < 8; l++)
+                    p[l] = c, p[8 + l] = sg * s;
+            }
+        float* tw = w + CZ_WR_FLOATS_AVX2;
+        for (int g = 0; g < R2 / 4; g++)
+            for (int k1 = 0; k1 < R1; k1++)
+                for (int l = 0; l < 4; l++)
+                {
+                    float c, s, *p = tw + (g * R1 + k1) * 16;
+                    unit_cs((4 * g + l) * k1, n, &c, &s);
+                    p[2 * l] = p[2 * l + 1] = c;
+                    p[8 + 2 * l] = p[8 + 2 * l + 1] = sg * s;
+                }
+    }
+}
+
+// Real plans of 256 <= n <= 2048 run the two-pass core on Z (complex M = n / 2) and split / merge it interleaved. Their
+// table after the core's: per 4 bins k = k0 + 1..k0 + 4 (k0 < M/2), h_k = -i W_n^k / 2 as (hr, hr, ...) / (hi, hi, ...)
+// ymm (cz_mul_avx2), n floats. The merge multiplies by conj(h_k)
+static size_t cz_real_bytes_avx2(int n)
+{
+    size_t c = cz_bytes_avx2(n / 2);
+    return c ? c + ALIGN_UP(n * sizeof(float)) : 0;
+}
+static float* cz_split_tw_avx2(const Plan_x86* plan) { return cz_tables_avx2(plan) + 2 * cz_dir_floats_avx2(plan->n / 2); }
+
+// Reverses the order of the 4 complex values in a ymm
+FI __m256 cz_rev_avx2(__m256 a) { return _mm256_castpd_ps(_mm256_permute4x64_pd(_mm256_castps_pd(a), 0x1B)); }
+// a * conj(w), w as in cz_mul_avx2
+FI __m256 cz_mulc_avx2(__m256 a, __m256 wr, __m256 wi)
+{
+    return _mm256_fmsubadd_ps(a, wr, _mm256_mul_ps(cz_swap_avx2(a), wi));
+}
+
+// tables: cz_tables_avx2(plan). mid: out, or a scratch buffer of 2N floats when in == out
+static void cz_run_avx2(const float* tables, const float* in, float* mid, float* out, int N, int inv)
+{
+    int          R1 = cz_r1_avx2(N), R2 = N / R1;
+    const float* w  = tables + inv * cz_dir_floats_avx2(N);
+    if (inv)
+    {
+        cz_pass1_inv_avx2(in, mid, N, R1, w);
+        cz_pass2_inv_avx2(mid, out, N, R2, w);
+    }
+    else
+    {
+        cz_pass1_fwd_avx2(in, mid, N, R1, w);
+        cz_pass2_fwd_avx2(mid, out, N, R2, w);
+    }
+}
+
+XFFT_DEF size_t xfft_mem_size_avx2(int n) { return mem_size_avx2(n) + cz_real_bytes_avx2(n); }
+XFFT_DEF void*  xfft_init_avx2(void* mem, int n)
+{
+    Plan_x86* plan = init_avx2(mem, n);
+    if (plan && cz_real_bytes_avx2(n))
+    {
+        int    M  = n / 2;
+        float* tw = cz_split_tw_avx2(plan);
+        cz_init_avx2(plan, M);
+        for (int k0 = 0; k0 < M / 2; k0 += 4)
+            for (int l = 0; l < 4; l++)
+            {
+                float c, s, *p = tw + 4 * k0 + 2 * l;
+                unit_cs(k0 + 1 + l, n, &c, &s); // W_n^k = c - i s, so h_k = (-s - i c) / 2
+                p[0] = p[1] = -0.5f * s;
+                p[8] = p[9] = -0.5f * c;
+            }
+    }
+    return plan;
+}
+
 XFFT_DEF void xfft_forward_avx2(void* p, const float* in, float* out)
 {
     XFFT_ASSERT(XFFT_IS_ALIGNED(p));
@@ -2371,6 +2667,30 @@ XFFT_DEF void xfft_forward_avx2(void* p, const float* in, float* out)
     // inverse reads them into its junk lanes, and nonzero junk could otherwise grow from call to call into inf / NaN.
     // A masked path for N = 64 instead costs 2-5% at 512-1024 in a shared copy, or a second copy (NOTES.md it20).
     int n = plan->n, M = n / 2, L = n / 16;
+    if (cz_real_bytes_avx2(n))
+    {
+        // 256 <= N <= 2048: the two-pass core (cz_run_avx2) leaves Z in out, interleaved, and the split runs in place,
+        // 4 bins k = k0+1..k0+4 and their mirrors M-k per iteration (both sides are loaded before either is stored):
+        // X[k] = S/2 + h_k D, X[M-k] = conj(S/2 - h_k D), S = Z[k] + conj Z[M-k], D = Z[k] - conj Z[M-k]
+        const float* tw  = cz_split_tw_avx2(plan);
+        const __m256 one = _mm256_set1_ps(1.0f), half = _mm256_set1_ps(0.5f);
+        const __m256 hpm = _mm256_setr_ps(0.5f, -0.5f, 0.5f, -0.5f, 0.5f, -0.5f, 0.5f, -0.5f);
+        cz_run_avx2(cz_tables_avx2(plan), in, in == out ? plan->zbuf : out, out, M, 0);
+        float z0r = out[0], z0i = out[1];
+        out[0]    = z0r + z0i;
+        out[1]    = z0r - z0i;
+        for (ptrdiff_t k0 = 0; k0 < M / 2; k0 += 4, tw += 16)
+        {
+            __m256 a  = _mm256_loadu_ps(out + 2 * k0 + 2);
+            __m256 b  = cz_rev_avx2(_mm256_load_ps(out + 2 * (M - k0 - 4)));
+            __m256 sm = _mm256_fmsubadd_ps(a, one, b); // a + conj b
+            __m256 d  = _mm256_addsub_ps(a, b);        // a - conj b
+            __m256 t  = cz_mul_avx2(d, _mm256_load_ps(tw), _mm256_load_ps(tw + 8));
+            _mm256_storeu_ps(out + 2 * k0 + 2, _mm256_fmadd_ps(sm, half, t));
+            _mm256_store_ps(out + 2 * (M - k0 - 4), cz_rev_avx2(_mm256_fmaddsub_ps(sm, hpm, t)));
+        }
+        return;
+    }
     // Lane FFT workspace: out, which the split overwrites last, to keep the cache footprint down. L < 8 needs the
     // junk vector after plan->work.
     float* work = L < 8 ? plan->work : out;
@@ -2520,6 +2840,30 @@ XFFT_DEF void xfft_inverse_avx2(void* p, const float* in, float* out)
     // N >= 64, runtime n. At N = 64, the junk lanes 4..7 of each Z row load read the next row (the last one the zero
     // floats after zbuf), and the scatter sends them to the junk vector (see xfft_forward_avx2).
     int n = plan->n, M = n / 2, L = n / 16;
+    if (cz_real_bytes_avx2(n))
+    {
+        // 256 <= N <= 2048: the merge (the forward split's inverse, times 2) writes Z to out, interleaved (in place
+        // when in == out, as the split), then the two-pass core's inverse runs out -> zbuf -> out:
+        // P = X[k], Q = conj X[M-k], 2 Z[k] = S + D, 2 Z[M-k] = conj(S - D), S = P + Q, D = 2 (P - Q) conj(h_k)
+        const float* tw  = cz_split_tw_avx2(plan);
+        const __m256 one = _mm256_set1_ps(1.0f), two = _mm256_set1_ps(2.0f);
+        const __m256 mp2 = _mm256_setr_ps(-2.0f, 2.0f, -2.0f, 2.0f, -2.0f, 2.0f, -2.0f, 2.0f);
+        float        x0 = in[0], xm = in[1];
+        for (ptrdiff_t k0 = 0; k0 < M / 2; k0 += 4, tw += 16)
+        {
+            __m256 p  = _mm256_loadu_ps(in + 2 * k0 + 2);
+            __m256 q  = cz_rev_avx2(_mm256_load_ps(in + 2 * (M - k0 - 4)));
+            __m256 sm = _mm256_fmsubadd_ps(p, one, q); // p + conj q
+            __m256 e  = _mm256_addsub_ps(p, q);        // p - conj q
+            __m256 d  = cz_mulc_avx2(e, _mm256_load_ps(tw), _mm256_load_ps(tw + 8)); // D / 2
+            _mm256_storeu_ps(out + 2 * k0 + 2, _mm256_fmadd_ps(d, two, sm));
+            _mm256_store_ps(out + 2 * (M - k0 - 4), cz_rev_avx2(_mm256_fmsubadd_ps(d, mp2, sm)));
+        }
+        out[0] = x0 + xm;
+        out[1] = x0 - xm;
+        cz_run_avx2(cz_tables_avx2(plan), out, plan->zbuf, out, M, 1);
+        return;
+    }
     // Lane FFT workspace: out, as in xfft_forward_avx2. The last lane stage then runs in place, which is safe since
     // each butterfly writes (interleaved) exactly the vectors it read.
     float* work = L < 8 ? plan->work : out;
@@ -2654,10 +2998,17 @@ NI LANE_ABI_AVX2 void cfft64_avx2(const float* xtw, const float* in, float* out,
 }
 
 // Complex FFT of n: the real plan of 2n runs exactly this as its steps 1 and 2 (zfwd_avx2, zinv_avx2), so a complex
-// plan is that plan. Its real split twiddles (rtw) go unused. n = 16 (real n = 32, dense32) is cfft16_x86, n = 32 is
-// cfft32_avx2, n = 64 cfft64_avx2.
-XFFT_DEF size_t xfft_complex_mem_size_avx2(int n) { return mem_size_avx2(2 * n); }
-XFFT_DEF void*  xfft_complex_init_avx2(void* mem, int n) { return init_avx2(mem, 2 * n); }
+// plan is that plan, plus the two-pass core's tables for 128 <= n <= 1024 (cz_run_avx2). Its real split twiddles (rtw)
+// go unused. n = 16 (real n = 32, dense32) is cfft16_x86, n = 32 is cfft32_avx2, n = 64 cfft64_avx2, so the cross
+// passes only see n >= 2048 here.
+XFFT_DEF size_t xfft_complex_mem_size_avx2(int n) { return mem_size_avx2(2 * n) + cz_bytes_avx2(n); }
+XFFT_DEF void*  xfft_complex_init_avx2(void* mem, int n)
+{
+    Plan_x86* plan = init_avx2(mem, 2 * n);
+    if (plan && cz_bytes_avx2(n))
+        cz_init_avx2(plan, n);
+    return plan;
+}
 
 XFFT_DEF void xfft_complex_forward_avx2(void* p, const float* in, float* out)
 {
@@ -2671,6 +3022,8 @@ XFFT_DEF void xfft_complex_forward_avx2(void* p, const float* in, float* out)
         cfft32_avx2(in, out, 0);
     else if (plan->n == 128)
         cfft64_avx2(plan->xtw, in, out, 0);
+    else if (plan->n <= 2048) // Complex 128..1024; through zbuf (2n floats) when in place
+        cz_run_avx2(cz_tables_avx2(plan), in, in == out ? plan->zbuf : out, out, plan->n / 2, 0);
     else // Lane FFTs in zbuf (2M floats, exactly the lane workspace), the cross pass writes interleaved Z to out
         zfwd_avx2(plan, in, plan->zbuf, out, 1);
 }
@@ -2687,6 +3040,8 @@ XFFT_DEF void xfft_complex_inverse_avx2(void* p, const float* in, float* out)
         cfft32_avx2(in, out, 1);
     else if (plan->n == 128)
         cfft64_avx2(plan->xtw, in, out, 1);
+    else if (plan->n <= 2048) // Complex 128..1024; through zbuf (2n floats) when in place
+        cz_run_avx2(cz_tables_avx2(plan), in, in == out ? plan->zbuf : out, out, plan->n / 2, 1);
     else // The cross pass reads interleaved 'in' and scatters into zbuf, the lanes run there and the last stage writes
          // out. All of 'in' is read before 'out' is written, so in == out is safe
         zinv_avx2(plan, plan->zbuf, out, in, 1);
