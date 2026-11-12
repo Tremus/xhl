@@ -926,6 +926,10 @@ FI v4 c_addi_neon(v4 a, v4 b) { return vcaddq_rot90_f32(a, b); }
 FI v4 c_subi_neon(v4 a, v4 b) { return vcaddq_rot270_f32(a, b); }
 FI v4 c_mul_neon(v4 a, v4 w) { return vcmlaq_rot90_f32(vcmlaq_f32(vdupq_n_f32(0.0f), w, a), w, a); }
 FI v4 c_mulc_neon(v4 a, v4 w) { return vcmlaq_rot270_f32(vcmlaq_f32(vdupq_n_f32(0.0f), w, a), w, a); }
+// The same for a twiddle (re, im, re, im) shared by both complex values: a * re by element instead of an FCMLA onto
+// a zeroed register, which saves the zeroing instruction (no FP pipe, but a decode / rename slot)
+FI v4 c_mul_sc_neon(v4 a, v4 w) { return vcmlaq_rot90_f32(vmulq_laneq_f32(a, w, 0), w, a); }
+FI v4 c_mulc_sc_neon(v4 a, v4 w) { return vcmlaq_rot270_f32(vmulq_laneq_f32(a, w, 0), w, a); }
 #else
 FI v4 c_sign_im(void) { return (v4){1.0f, -1.0f, 1.0f, -1.0f}; }
 FI v4 c_addi_neon(v4 a, v4 b) { return vfmsq_f32(a, vrev64q_f32(b), c_sign_im()); }
@@ -938,6 +942,8 @@ FI v4 c_mulc_neon(v4 a, v4 w)
 {
     return vfmaq_f32(vmulq_f32(a, vtrn1q_f32(w, w)), vrev64q_f32(a), vmulq_f32(vtrn2q_f32(w, w), c_sign_im()));
 }
+FI v4 c_mul_sc_neon(v4 a, v4 w) { return c_mul_neon(a, w); }
+FI v4 c_mulc_sc_neon(v4 a, v4 w) { return c_mulc_neon(a, w); }
 #endif
 FI v4 c_conj(v4 a)
 {
@@ -969,13 +975,17 @@ FI cv_neon cv_subi(cv_neon x, cv_neon y) { return (cv_neon){c_subi_neon(x.a, y.a
 // (re, im, re, im) for both when 'sc'
 FI cv_neon cv_mul_neon(cv_neon x, const float* w, int sc)
 {
-    v4 w0 = vld1q_f32(w), w1 = sc ? w0 : vld1q_f32(w + 4);
-    return (cv_neon){c_mul_neon(x.a, w0), c_mul_neon(x.b, w1)};
+    v4 w0 = vld1q_f32(w);
+    if (sc)
+        return (cv_neon){c_mul_sc_neon(x.a, w0), c_mul_sc_neon(x.b, w0)};
+    return (cv_neon){c_mul_neon(x.a, w0), c_mul_neon(x.b, vld1q_f32(w + 4))};
 }
 FI cv_neon cv_mulc_neon(cv_neon x, const float* w, int sc)
 {
-    v4 w0 = vld1q_f32(w), w1 = sc ? w0 : vld1q_f32(w + 4);
-    return (cv_neon){c_mulc_neon(x.a, w0), c_mulc_neon(x.b, w1)};
+    v4 w0 = vld1q_f32(w);
+    if (sc)
+        return (cv_neon){c_mulc_sc_neon(x.a, w0), c_mulc_sc_neon(x.b, w0)};
+    return (cv_neon){c_mulc_neon(x.a, w0), c_mulc_neon(x.b, vld1q_f32(w + 4))};
 }
 // x + h*y and x - h*y for a real scalar h
 FI cv_neon cv_fma(cv_neon x, cv_neon y, float h)
@@ -1113,6 +1123,7 @@ NI void lane_fwd_rec_neon(
     const Plan_neon* plan,
     const float*     in,
     float*           work,
+    const float*     xtw,
     const int*       radix,
     const int*       span,
     const int*       twoff,
@@ -1131,11 +1142,11 @@ NI void lane_fwd_rec_neon(
             radix[t],
             span[t],
             plan->stw + twoff[t],
-            plan->xtw + 8 * base);
+            xtw + 8 * base);
         if (size > LANE_BLOCK_NEON && t + 1 < S)
         {
             for (int b = 0; b < radix[t]; b++)
-                lane_fwd_rec_neon(plan, in, work, radix, span, twoff, S, t + 1, base + b * span[t], span[t]);
+                lane_fwd_rec_neon(plan, in, work, xtw, radix, span, twoff, S, t + 1, base + b * span[t], span[t]);
             return;
         }
     }
@@ -1172,34 +1183,38 @@ NI void lane_inv_rec_neon(
 }
 
 // Cross-lane radix 4 for bins k (y0) and k+1 (y1): radix 2 over (r, r+2) inside the vectors, then over (r, r+1)
-// between the vector halves. Z_q = sum_r Y_r (-i)^(rq) goes to Z[k + qL], Z[k+1 + qL] (one vector)
-FI void cross_fwd(cv_neon y0, cv_neon y1, float* z, ptrdiff_t k, ptrdiff_t L)
+// between the vector halves. Z_q = sum_r Y_r (-i)^(rq) goes to Z[k + qL], Z[k+1 + qL] (one vector), with re and im
+// swapped when sw (a compile-time constant at each call; see INV_VIA_FWD_NEON)
+FI void cross_fwd(cv_neon y0, cv_neon y1, float* z, ptrdiff_t k, ptrdiff_t L, int sw)
 {
     v4 p0 = vaddq_f32(y0.a, y0.b), q0 = vsubq_f32(y0.a, y0.b), p1 = vaddq_f32(y1.a, y1.b), q1 = vsubq_f32(y1.a, y1.b);
     v4 pl = c_lo(p0, p1), ph = c_hi(p0, p1), ql = c_lo(q0, q1), qh = c_hi(q0, q1);
-    vst1q_f32(z + 2 * k, vaddq_f32(pl, ph));
-    vst1q_f32(z + 2 * (k + L), c_subi_neon(ql, qh));
-    vst1q_f32(z + 2 * (k + 2 * L), vsubq_f32(pl, ph));
-    vst1q_f32(z + 2 * (k + 3 * L), c_addi_neon(ql, qh));
+    v4 z0 = vaddq_f32(pl, ph), z1 = c_subi_neon(ql, qh), z2 = vsubq_f32(pl, ph), z3 = c_addi_neon(ql, qh);
+    vst1q_f32(z + 2 * k, sw ? vrev64q_f32(z0) : z0);
+    vst1q_f32(z + 2 * (k + L), sw ? vrev64q_f32(z1) : z1);
+    vst1q_f32(z + 2 * (k + 2 * L), sw ? vrev64q_f32(z2) : z2);
+    vst1q_f32(z + 2 * (k + 3 * L), sw ? vrev64q_f32(z3) : z3);
 }
 
-// Adjoint of cross_fwd: Z[k + qL], Z[k+1 + qL] -> bins k (*y0) and k+1 (*y1).
-// pl = Z0 + Z2, ph = Z0 - Z2, ql = Z1 + Z3, qh = i(Z1 - Z3), then radix 2 over (r, r+2)
+// Adjoint of cross_fwd: Z[k + qL], Z[k+1 + qL] -> bins k (*y0) and k+1 (*y1). The whole radix 4 runs on vectors
+// holding both bins, Y_r = sum_q Z_q i^(rq): Y1 = (Z0 - Z2) + i(Z1 - Z3) is one FCADD (no i*(Z1 - Z3) onto a
+// zeroed register), then one 2x2 transpose of complex values per bin pair puts (Y0, Y1), (Y2, Y3) in each cv
 FI void cross_inv(const float* z, ptrdiff_t k, ptrdiff_t L, cv_neon* y0, cv_neon* y1)
 {
     v4 z0 = vld1q_f32(z + 2 * k), z1 = vld1q_f32(z + 2 * (k + L));
     v4 z2 = vld1q_f32(z + 2 * (k + 2 * L)), z3 = vld1q_f32(z + 2 * (k + 3 * L));
-    v4 pl = vaddq_f32(z0, z2), ph = vsubq_f32(z0, z2);
-    v4 ql = vaddq_f32(z1, z3), qh = c_addi_neon(vdupq_n_f32(0.0f), vsubq_f32(z1, z3));
-    v4 p0 = c_lo(pl, ph), p1 = c_hi(pl, ph), q0 = c_lo(ql, qh), q1 = c_hi(ql, qh);
-    *y0 = (cv_neon){vaddq_f32(p0, q0), vsubq_f32(p0, q0)};
-    *y1 = (cv_neon){vaddq_f32(p1, q1), vsubq_f32(p1, q1)};
+    v4 pl = vaddq_f32(z0, z2), ph = vsubq_f32(z0, z2), ql = vaddq_f32(z1, z3), d = vsubq_f32(z1, z3);
+    v4 Y0 = vaddq_f32(pl, ql), Y2 = vsubq_f32(pl, ql), Y1 = c_addi_neon(ph, d), Y3 = c_subi_neon(ph, d);
+    *y0 = (cv_neon){c_lo(Y0, Y1), c_lo(Y2, Y3)};
+    *y1 = (cv_neon){c_hi(Y0, Y1), c_hi(Y2, Y3)};
 }
 
 // Steps 1 and 2 of xfft_forward_neon, the complex FFT of M = n/2: lane layout input 'in' -> Z in 'z', natural order,
-// interleaved, scaled by 0.5 (the forward cross-lane twiddles hold the real split's 0.5). 'work' is the N float lane
-// workspace. Shared with xfft_complex_forward_neon
-FI void zfwd_neon(const Plan_neon* plan, const float* in, float* work, float* z)
+// interleaved. 'xtw' is the cross-lane twiddle table: plan->xtw leaves Z scaled by 0.5 (the real split's 0.5),
+// xtw_inv(plan) holds the same twiddles unscaled. 'work' is the N float lane workspace. 'sw' swaps re and im on the
+// way out, only for L > LANE_BLOCK_NEON (where the cross-lane pass isn't fused). Shared with the complex transforms
+// and the large-L inverses through zfwd_ni_neon
+FI void zfwd_neon(const Plan_neon* plan, const float* xtw, const float* in, float* work, float* z, int sw)
 {
     int n = plan->n, L = n / 8;
     // 1. Lane FFTs: input (already in lane layout) -> work, digit-reversed. The last stage (span 1) applies the
@@ -1221,16 +1236,16 @@ FI void zfwd_neon(const Plan_neon* plan, const float* in, float* work, float* z)
         // 16 lines for 8 ways, 2.1 ns per position against 1.0 in place. Copying first is ~0.3
         if (in != work)
             __builtin_memcpy(work, in, n * sizeof(float));
-        lane_fwd_rec_neon(plan, work, work, radix, span, twoff, S, 0, 0, L);
+        lane_fwd_rec_neon(plan, work, work, xtw, radix, span, twoff, S, 0, 0, L);
     }
     else
     {
         const float* tw = plan->stw;
-        lane_stage_fwd_neon(in, work, L, radix[0], span[0], tw, plan->xtw);
+        lane_stage_fwd_neon(in, work, L, radix[0], span[0], tw, xtw);
         tw += stage_tw_neon(radix[0], span[0]);
         for (int t = 1; t < S - fused; t++)
         {
-            lane_stage_fwd_neon(work, work, L, radix[t], span[t], tw, plan->xtw);
+            lane_stage_fwd_neon(work, work, L, radix[t], span[t], tw, xtw);
             tw += stage_tw_neon(radix[t], span[t]);
         }
     }
@@ -1245,7 +1260,7 @@ FI void zfwd_neon(const Plan_neon* plan, const float* in, float* work, float* z)
         for (int kb = 0; kb < L / 4; kb += 2)
         {
             const float* b = work + rev[kb];
-            const float* w = plan->xtw + rev[kb];
+            const float* w = xtw + rev[kb];
             cv_neon      x[4], y[4];
             for (int m = 0; m < 4; m++)
             {
@@ -1260,16 +1275,34 @@ FI void zfwd_neon(const Plan_neon* plan, const float* in, float* work, float* z)
                     cv_mul_neon(y[m], w + off1 + 8 * m, 0),
                     z,
                     kb + m * (L / 4),
-                    L);
+                    L,
+                    0);
         }
     }
     else
     {
         // 2. Cross-lane: work (already twiddled) -> Z in natural order, bins k0, k0+1 per iteration
-        for (int k0 = 0; k0 < L; k0 += 2)
-            cross_fwd(cv_ld_neon(work + rev[k0]), cv_ld_neon(work + rev[k0] + off1), z, k0, L);
+        if (sw)
+            for (int k0 = 0; k0 < L; k0 += 2)
+                cross_fwd(cv_ld_neon(work + rev[k0]), cv_ld_neon(work + rev[k0] + off1), z, k0, L, 1);
+        else
+            for (int k0 = 0; k0 < L; k0 += 2)
+                cross_fwd(cv_ld_neon(work + rev[k0]), cv_ld_neon(work + rev[k0] + off1), z, k0, L, 0);
     }
 }
+
+// zfwd_neon, not inlined: one copy for the complex transforms and the large-L inverses
+NI void zfwd_ni_neon(const Plan_neon* plan, const float* xtw, const float* in, float* work, float* z, int sw)
+{
+    zfwd_neon(plan, xtw, in, work, z, sw);
+}
+
+// Above LANE_BLOCK_NEON the real inverse runs as the forward: IDFT(Z) = swap(DFT(swap(Z))), swap exchanging re and
+// im, with the unscaled cross-lane twiddles (xtw_inv). The forward's large-L lanes and plain cross-lane pass beat the
+// inverse's tiled cross-lane pass and DIT lanes, and both swaps ride on memory-bound passes: the merge's stores and
+// the cross-lane stores. The complex inverse does the same from this L up; its swap needs a pass of its own (a
+// swapped copy into zbuf), which costs more than it saves below (32768 complex inv +11%, 262144 -16%)
+#define INV_VIA_FWD_NEON 65536
 
 XFFT_DEF void xfft_forward_neon(void* p, const float* in, float* out)
 {
@@ -1282,7 +1315,7 @@ XFFT_DEF void xfft_forward_neon(void* p, const float* in, float* out)
     float* work = out;
     float* z    = plan->zbuf;
 
-    zfwd_neon(plan, in, work, z);
+    zfwd_neon(plan, plan->xtw, in, work, z, 0);
     {
         // 3. Real split, 2 bins k = k0+1, k0+2 and their mirrors M-k per iteration:
         // X[k] = E + W_N^k O, X[M-k] = conj(E - W_N^k O), E = (Z[k] + conj Z[M-k])/2, O = (Z[k] - conj Z[M-k])/2i.
@@ -1306,7 +1339,7 @@ XFFT_DEF void xfft_forward_neon(void* p, const float* in, float* out)
 // Steps 2 and 1 of xfft_inverse_neon, the inverse complex FFT of M = n/2 (unnormalised): Z in 'z', natural order,
 // interleaved -> 'out' (lane layout). 'work' is the N float lane workspace: out, or zbuf when z is out (see there).
 // Shared with xfft_complex_inverse_neon
-FI void zinv_neon(const Plan_neon* plan, float* z, float* work, float* out)
+FI void zinv_neon(const Plan_neon* plan, const float* z, float* work, float* out)
 {
     int n = plan->n, L = n / 8;
     int radix[MAX_STAGES], span[MAX_STAGES], twoff[MAX_STAGES], S = lane_stages_neon(L, radix, span);
@@ -1395,6 +1428,37 @@ FI void zinv_neon(const Plan_neon* plan, float* z, float* work, float* out)
     }
 }
 
+// Step 3 of xfft_inverse_neon, the merge: packed ordered spectrum 'in' -> Z in 'z', natural order, interleaved, with
+// re and im swapped when sw (a compile-time constant at each call, for INV_VIA_FWD_NEON). 2 bins k = k0+1, k0+2 and
+// their mirrors per iteration, with c = conj X[M-k]:
+// A = X[k] + c, B = (X[k] - c) conj(W_N^k), Z[k] = A + iB, Z[M-k] = conj A + i conj B = conj(A - iB).
+// z may be in (at 8192, in == out), so in[0..1] are read before z[0] is written
+FI void merge_neon(const Plan_neon* plan, int M, const float* in, float* z, int sw)
+{
+    const float* tw = plan->rtw;
+    float        x0 = in[0], x1 = in[1];
+    z[sw]           = x0 + x1;
+    z[1 - sw]       = x0 - x1;
+    for (int k0 = 0; k0 < M / 2; k0 += 2)
+    {
+        v4 x  = vld1q_f32(in + 2 * k0 + 2);
+        v4 c  = c_conj(c_swap(vld1q_f32(in + 2 * (M - k0 - 2))));
+        v4 a  = vaddq_f32(x, c);
+        v4 b  = c_mulc_neon(vsubq_f32(x, c), vld1q_f32(tw + 2 * k0));
+        v4 zk = c_addi_neon(a, b), zm = c_swap(c_conj(c_subi_neon(a, b)));
+        vst1q_f32(z + 2 * k0 + 2, sw ? vrev64q_f32(zk) : zk);
+        vst1q_f32(z + 2 * (M - k0 - 2), sw ? vrev64q_f32(zm) : zm);
+    }
+}
+
+// xfft_inverse_neon for L > LANE_BLOCK_NEON (see INV_VIA_FWD_NEON): swapped Z in zbuf, then the forward path in place
+// there (the merge reads all of in before out is written). Not inlined, to keep it out of the small sizes' code
+NI void inverse_via_fwd_neon(const Plan_neon* plan, const float* in, float* out)
+{
+    merge_neon(plan, plan->n / 2, in, plan->zbuf, 1);
+    zfwd_ni_neon(plan, xtw_inv(plan), plan->zbuf, plan->zbuf, out, 1);
+}
+
 XFFT_DEF void xfft_inverse_neon(void* p, const float* in, float* out)
 {
     XFFT_ASSERT(XFFT_IS_ALIGNED(p));
@@ -1402,33 +1466,16 @@ XFFT_DEF void xfft_inverse_neon(void* p, const float* in, float* out)
     XFFT_ASSERT(XFFT_IS_ALIGNED(out));
     const Plan_neon* plan = p;
     int              n = plan->n, M = n / 2, L = n / 8;
+    if (L > LANE_BLOCK_NEON)
+        return inverse_via_fwd_neon(plan, in, out);
     // Lane FFT workspace: out, as in xfft_forward_neon. The last lane stage then runs in place, which is safe since
     // each butterfly writes exactly the vectors it read. At 8192 the working set is larger than L1, so zbuf is mostly
     // evicted between calls and the merge's descending stores into it were slow (+40% for the merge): there Z goes
-    // in out, which is still cached, and the lane FFTs run in zbuf. Smaller sizes are 2-3% faster without the swap,
-    // and so are large L (nothing stays cached there, and the lanes run in place in out with no copy at the end)
-    int    swap = n >= 8192 && L <= LANE_BLOCK_NEON;
+    // in out, which is still cached, and the lane FFTs run in zbuf. Smaller sizes are 2-3% faster without the swap
+    int    swap = n >= 8192;
     float* work = swap ? plan->zbuf : out;
     float* z    = swap ? out : plan->zbuf;
-
-    {
-        // 3. Merge, 2 bins k = k0+1, k0+2 and their mirrors per iteration, with c = conj X[M-k]:
-        // A = X[k] + c, B = (X[k] - c) conj(W_N^k), Z[k] = A + iB, Z[M-k] = conj A + i conj B = conj(A - iB)
-        // At 8192 z is out, so with in == out read in[0..1] before writing z[0]
-        const float* tw = plan->rtw;
-        float        x0 = in[0], x1 = in[1];
-        z[0] = x0 + x1;
-        z[1] = x0 - x1;
-        for (int k0 = 0; k0 < M / 2; k0 += 2)
-        {
-            v4 x = vld1q_f32(in + 2 * k0 + 2);
-            v4 c = c_conj(c_swap(vld1q_f32(in + 2 * (M - k0 - 2))));
-            v4 a = vaddq_f32(x, c);
-            v4 b = c_mulc_neon(vsubq_f32(x, c), vld1q_f32(tw + 2 * k0));
-            vst1q_f32(z + 2 * k0 + 2, c_addi_neon(a, b));
-            vst1q_f32(z + 2 * (M - k0 - 2), c_swap(c_conj(c_subi_neon(a, b))));
-        }
-    }
+    merge_neon(plan, M, in, z, 0);
     zinv_neon(plan, z, work, out);
 }
 
@@ -1445,17 +1492,10 @@ XFFT_DEF void xfft_complex_forward_neon(void* p, const float* in, float* out)
     XFFT_ASSERT(XFFT_IS_ALIGNED(in));
     XFFT_ASSERT(XFFT_IS_ALIGNED(out));
     const Plan_neon* plan = p;
-    int              n    = plan->n;
-    float*           z    = plan->zbuf;
-    // The interleaved input is already the lane layout. The lane workspace is out, as in xfft_forward_neon
-    zfwd_neon(plan, in, out, z);
-    // zfwd_neon leaves Z halved (for the real split): undo it on the way out
-    v4 two = vdupq_n_f32(2.0f);
-    for (int i = 0; i < n; i += 8)
-    {
-        vst1q_f32(out + i, vmulq_f32(vld1q_f32(z + i), two));
-        vst1q_f32(out + i + 4, vmulq_f32(vld1q_f32(z + i + 4), two));
-    }
+    // The interleaved input is already the lane layout. The unscaled cross-lane twiddles (xtw_inv, the same values
+    // the inverse conjugates) give Z itself, so the cross-lane pass writes it straight to out, with the lanes in
+    // zbuf. Stage 0 reads in before anything writes out, so in == out is safe
+    zfwd_ni_neon(plan, xtw_inv(plan), in, plan->zbuf, out, 0);
 }
 
 XFFT_DEF void xfft_complex_inverse_neon(void* p, const float* in, float* out)
@@ -1464,12 +1504,30 @@ XFFT_DEF void xfft_complex_inverse_neon(void* p, const float* in, float* out)
     XFFT_ASSERT(XFFT_IS_ALIGNED(in));
     XFFT_ASSERT(XFFT_IS_ALIGNED(out));
     const Plan_neon* plan = p;
-    int              n    = plan->n;
-    float*           z    = plan->zbuf;
-    // Z in zbuf, lane workspace out (xfft_inverse_neon's unswapped case, which every size handles). Copying first
-    // also makes in == out safe
-    __builtin_memcpy(z, in, n * sizeof(float));
-    zinv_neon(plan, z, out, out);
+    int              n = plan->n, L = n / 8;
+    float*           zbuf = plan->zbuf;
+    // Z is read straight from in. Out of place, the lanes run in out (xfft_inverse_neon's unswapped case). In place,
+    // the cross-lane pass can't write the buffer it reads: the lanes run in zbuf and the last stage writes out. Large
+    // L runs every lane stage in place in 'work', so there Z is copied to zbuf first instead. One zinv_neon call
+    // site: it's inlined
+    const float* z    = in;
+    float*       work = out;
+    if (L >= INV_VIA_FWD_NEON)
+    {
+        // Swapped copy into zbuf (all of in is read before out is written), then the forward path
+        for (int i = 0; i < n; i += 4)
+            vst1q_f32(zbuf + i, vrev64q_f32(vld1q_f32(in + i)));
+        zfwd_ni_neon(plan, xtw_inv(plan), zbuf, zbuf, out, 1);
+        return;
+    }
+    if (in == out && L <= LANE_BLOCK_NEON)
+        work = zbuf;
+    else if (in == out)
+    {
+        __builtin_memcpy(zbuf, in, n * sizeof(float));
+        z = zbuf;
+    }
+    zinv_neon(plan, z, work, out);
 }
 
 #elif !defined(XFFT_NO_STUBS) // No AArch64 NEON (or XFFT_DISABLE_NEON): planning fails
