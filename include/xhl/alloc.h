@@ -48,9 +48,29 @@ void xvalloc_info(size_t* valloc_granularity, size_t* page_size);
 #define xalloc_assert(cond) (cond) ? (void)0 : __builtin_debugtrap()
 #endif
 
-// Not recommended for debugging in multi-instance & multi-threaded contexts.
 int g_num_xmallocs = 0;
 int g_num_xvallocs = 0;
+
+// Leak detector lock
+static volatile char g_xalloc_lock = 0;
+#if defined(__GNUC__) || defined(__clang__)
+static void xalloc_lock()
+{
+    while (__atomic_exchange_n(&g_xalloc_lock, 1, __ATOMIC_ACQUIRE))
+    {
+    }
+}
+static void xalloc_unlock() { __atomic_store_n(&g_xalloc_lock, 0, __ATOMIC_RELEASE); }
+#else
+#include <intrin.h>
+static void xalloc_lock()
+{
+    while (_InterlockedExchange8(&g_xalloc_lock, 1))
+    {
+    }
+}
+static void xalloc_unlock() { _InterlockedExchange8(&g_xalloc_lock, 0); }
+#endif
 
 #ifndef XALLOC_ALLOC_ARRAY_SIZE
 #define XALLOC_ALLOC_ARRAY_SIZE 1024
@@ -108,8 +128,10 @@ void* xmalloc(size_t size)
 {
     void* ptr = malloc(size);
 #ifndef NDEBUG
+    xalloc_lock();
     xalloc_add_alloc(ptr);
     g_num_xmallocs++;
+    xalloc_unlock();
 #endif
     if (ptr == NULL)
         exit(ENOMEM);
@@ -120,6 +142,7 @@ void* xrealloc(void* old_ptr, size_t new_size)
 {
     void* new_ptr = realloc(old_ptr, new_size);
 #ifndef NDEBUG
+    xalloc_lock();
     if (old_ptr != new_ptr)
     {
         if (old_ptr)
@@ -128,6 +151,7 @@ void* xrealloc(void* old_ptr, size_t new_size)
     }
     if (old_ptr == NULL && new_size > 0)
         g_num_xmallocs++;
+    xalloc_unlock();
 #endif
     if (new_ptr == NULL)
         exit(ENOMEM);
@@ -138,8 +162,10 @@ void* xcalloc(size_t num, size_t size)
 {
     void* ptr = calloc(num, size);
 #ifndef NDEBUG
+    xalloc_lock();
     xalloc_add_alloc(ptr);
     g_num_xmallocs++;
+    xalloc_unlock();
 #endif
     if (ptr == NULL)
         exit(ENOMEM);
@@ -152,8 +178,10 @@ void xfree(void* ptr)
     {
         free(ptr);
 #ifndef NDEBUG
+        xalloc_lock();
         xalloc_remove_alloc(ptr);
         g_num_xmallocs--;
+        xalloc_unlock();
         xalloc_assert(g_num_xmallocs >= 0);
 #endif
     }
@@ -171,7 +199,9 @@ void* xvalloc(void* hint, size_t size)
         ptr = VirtualAlloc(0, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     xalloc_assert(ptr != NULL);
 #ifndef NDEBUG
+    xalloc_lock();
     g_num_xvallocs++;
+    xalloc_unlock();
 #endif
     return ptr;
 }
@@ -181,7 +211,9 @@ void xvfree(void* ptr, size_t size)
     xalloc_assert(ptr != NULL);
     BOOL ok = VirtualFree(ptr, 0, MEM_RELEASE);
 #ifndef NDEBUG
+    xalloc_lock();
     g_num_xvallocs--;
+    xalloc_unlock();
     xalloc_assert(g_num_xvallocs >= 0);
     DWORD err = GetLastError();
 #endif
@@ -216,7 +248,9 @@ void* xvalloc(void* hint, size_t size)
     void* ptr = mmap(hint, size, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
 #ifndef NDEBUG
     xalloc_assert((size_t)ptr != 0xffffffffffffffff);
+    xalloc_lock();
     g_num_xvallocs++;
+    xalloc_unlock();
 #endif
     return ptr;
 }
@@ -226,7 +260,9 @@ void xvfree(void* ptr, size_t size)
     xalloc_assert(ptr != NULL);
     munmap(ptr, size);
 #ifndef NDEBUG
+    xalloc_lock();
     g_num_xvallocs--;
+    xalloc_unlock();
     xalloc_assert(g_num_xvallocs >= 0);
 #endif
 }
