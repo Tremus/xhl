@@ -692,20 +692,29 @@ bool xfiles_write(const char* path, const void* in, size_t inlen)
 
 bool xfiles_append(const char* path, const char* in, size_t inlen)
 {
+    XFILES_ASSERT(inlen < MAXDWORD);
     WCHAR  FilePath[MAX_PATH];
-    HANDLE hFile         = NULL;
+    HANDLE hFile         = INVALID_HANDLE_VALUE;
     BOOL   ok            = FALSE;
     DWORD  nBytesWritten = 0;
     int    num = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, FilePath, XFILES_ARRLEN(FilePath));
     XFILES_ASSERT(num);
     if (num)
     {
-        hFile =
-            CreateFileW(FilePath, FILE_APPEND_DATA, FILE_SHARE_READ, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        hFile = CreateFileW(
+            FilePath,
+            FILE_APPEND_DATA,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            NULL,
+            OPEN_ALWAYS,
+            FILE_ATTRIBUTE_NORMAL,
+            NULL);
         XFILES_ASSERT(hFile != INVALID_HANDLE_VALUE);
         if (hFile != INVALID_HANDLE_VALUE)
         {
-            ok = WriteFile(hFile, in, inlen, &nBytesWritten, NULL);
+            ok = WriteFile(hFile, in, (DWORD)inlen, &nBytesWritten, NULL);
+            XFILES_ASSERT(ok);
+            ok &= nBytesWritten == (DWORD)inlen;
             XFILES_ASSERT(ok);
             ok &= CloseHandle(hFile);
             XFILES_ASSERT(ok);
