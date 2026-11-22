@@ -1,9 +1,6 @@
 #pragma once
 #include <string.h>
 // Experimenting with a rewrite of array.h
-#ifdef __cplusplus
-#error Not supported yet...
-#endif
 
 #if !(defined(XARR_REALLOC) || defined(XARR_FREE))
 #include <stdlib.h>
@@ -47,7 +44,7 @@ static void xarray_grow(void** arr, size_t stride, size_t nextcap)
             nextcap = head->capacity * 2;
     }
 
-    head           = XARR_REALLOC((void*)head, sizeof(*head) + stride * nextcap);
+    head           = (struct xarray_header2*)XARR_REALLOC((void*)head, sizeof(*head) + stride * nextcap);
     head->capacity = nextcap;
     if (*arr == NULL) // init new array
         head->length = 0;
