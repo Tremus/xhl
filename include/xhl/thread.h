@@ -290,10 +290,19 @@ static inline int64_t xt_atomic_compare_exchange_i64_ordered(xt_atomic_int64_t* 
 
 #endif
 
+// Pointers are 4 bytes on wasm32, so a 64 bit op would also touch the 4 bytes after the pointer
+// compare_exchange_strong_ptr returns true if it swapped
+#if UINTPTR_MAX == UINT64_MAX
 static inline void* xt_atomic_load_ptr(const xt_atomic_ptr_t* ptr) { return (void*)xt_atomic_load_u64((const xt_atomic_uint64_t*)ptr); }
 static inline void  xt_atomic_store_ptr(xt_atomic_ptr_t* ptr, void* v) { xt_atomic_store_u64((xt_atomic_uint64_t*)ptr, (uint64_t)v); }
 static inline void* xt_atomic_exchange_ptr(xt_atomic_ptr_t* ptr, void* v) { return (void*)xt_atomic_exchange_u64((xt_atomic_uint64_t*)ptr, (uint64_t)v); }
-static inline bool  xt_atomic_compare_exchange_strong_ptr(xt_atomic_ptr_t* ptr, void* expected, void* desired) { return xt_atomic_compare_exchange_u64((xt_atomic_uint64_t*)ptr, (uint64_t)expected, (uint64_t)desired); }
+static inline bool  xt_atomic_compare_exchange_strong_ptr(xt_atomic_ptr_t* ptr, void* expected, void* desired) { return xt_atomic_compare_exchange_u64((xt_atomic_uint64_t*)ptr, (uint64_t)expected, (uint64_t)desired) == (uint64_t)expected; }
+#else
+static inline void* xt_atomic_load_ptr(const xt_atomic_ptr_t* ptr) { return (void*)(uintptr_t)xt_atomic_load_u32((const xt_atomic_uint32_t*)ptr); }
+static inline void  xt_atomic_store_ptr(xt_atomic_ptr_t* ptr, void* v) { xt_atomic_store_u32((xt_atomic_uint32_t*)ptr, (uint32_t)(uintptr_t)v); }
+static inline void* xt_atomic_exchange_ptr(xt_atomic_ptr_t* ptr, void* v) { return (void*)(uintptr_t)xt_atomic_exchange_u32((xt_atomic_uint32_t*)ptr, (uint32_t)(uintptr_t)v); }
+static inline bool  xt_atomic_compare_exchange_strong_ptr(xt_atomic_ptr_t* ptr, void* expected, void* desired) { return xt_atomic_compare_exchange_u32((xt_atomic_uint32_t*)ptr, (uint32_t)(uintptr_t)expected, (uint32_t)(uintptr_t)desired) == (uint32_t)(uintptr_t)expected; }
+#endif
 
 union xt_uif {unsigned u; int i; float f;};
 
