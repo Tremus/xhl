@@ -215,6 +215,9 @@ static inline int16_t  xt_atomic_compare_exchange_i16_ordered(xt_atomic_int16_t*
 static inline int32_t  xt_atomic_compare_exchange_i32_ordered(xt_atomic_int32_t*  ptr, int32_t  expected, int32_t  desired, enum xt_memory_order order) { (void)order; return xt_atomic_compare_exchange_i32(ptr, expected, desired); }
 static inline int64_t  xt_atomic_compare_exchange_i64_ordered(xt_atomic_int64_t*  ptr, int64_t  expected, int64_t  desired, enum xt_memory_order order) { (void)order; return xt_atomic_compare_exchange_i64(ptr, expected, desired); }
 
+// Interlocked ops are full barriers (in the compiler & the CPU), so one on a local stands in for any fence
+static inline void xt_atomic_thread_fence(enum xt_memory_order order) { (void)order; xt_atomic_uint32_t barrier = 0; xt_atomic_exchange_u32(&barrier, 0); }
+
 #else
 
 static inline uint8_t  xt_atomic_load_u8_ordered (const xt_atomic_uint8_t*  ptr, enum xt_memory_order order) { return __atomic_load_n(ptr, order); }
@@ -287,6 +290,8 @@ static inline int64_t xt_atomic_compare_exchange_i64_ordered(xt_atomic_int64_t* 
     __atomic_compare_exchange_n((xt_atomic_uint64_t*)ptr, &exp, (uint64_t)desired, 0, order, order);
     return (int64_t)exp;
 }
+
+static inline void xt_atomic_thread_fence(enum xt_memory_order order) { __atomic_thread_fence(order); }
 
 #endif
 
