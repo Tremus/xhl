@@ -58,8 +58,6 @@ typedef union  xt_signal_t xt_signal_t;
 typedef union  xt_timer_t  xt_timer_t;
 typedef struct xt_queue_t  xt_queue_t;
 
-typedef volatile unsigned char xt_spinlock_t;
-
 xt_thread_ptr_t xthread_current(void);
 xt_thread_ptr_t xthread_create(int (*thread_proc)(void*), void* user_data, int stack_size);
 
@@ -341,12 +339,6 @@ int   xthread_queue_produce(xt_queue_t* queue, void* value, int timeout_ms);
 void* xthread_queue_consume(xt_queue_t* queue, int timeout_ms);
 int   xthread_queue_count(xt_queue_t* queue);
 
-// Progressive backoff spinlock based on Timur Doumler's ADC 2020 talk
-// https://www.youtube.com/watch?v=zrWYJ6FdOFQ
-void xt_spinlock_lock(xt_spinlock_t* ptr);
-bool xt_spinlock_trylock(xt_spinlock_t* ptr);
-void xt_spinlock_unlock(xt_spinlock_t* ptr);
-
 union xt_mutex_t
 {
     void* align;
@@ -390,20 +382,6 @@ struct xt_queue_t
 
 #ifdef XHL_THREAD_IMPL
 #undef XHL_THREAD_IMPL
-
-#if defined(__x86_64__) || defined(_M_X64)
-// Used for _mm_pause(), an SSE2 instruction, which naively assume is available
-// https://www.intel.com/content/www/us/en/docs/cpp-compiler/developer-guide-reference/2021-10/pause-intrinsic.html
-#include <emmintrin.h>
-#elif __arm64__
-// Used for __wfe()
-// https://developer.arm.com/documentation/dui0375/g/Compiler-specific-Features/--wfe-intrinsic
-#include <arm_acle.h>
-#elif defined(__wasm__)
-// No pause/wfe hint on wasm. xt_spinlock_lock falls back to trylock + yield
-#else
-#error "Microarchitecture not supported!"
-#endif
 
 #include <assert.h>
 #define XTHREAD_ASSERT(expression, message) assert((expression) && (message))
@@ -590,9 +568,6 @@ int16_t  xt_atomic_compare_exchange_i16(xt_atomic_int16_t*  ptr, int16_t  expect
 int32_t  xt_atomic_compare_exchange_i32(xt_atomic_int32_t*  ptr, int32_t  expected, int32_t  desired) { return _InterlockedCompareExchange  (ptr, desired, expected); }
 int64_t  xt_atomic_compare_exchange_i64(xt_atomic_int64_t*  ptr, int64_t  expected, int64_t  desired) { return _InterlockedCompareExchange64(ptr, desired, expected); }
 
-bool xt_spinlock_trylock(xt_spinlock_t*  ptr) { return _InterlockedCompareExchange8(ptr, 1, 0) == 0; }
-void xt_spinlock_unlock( xt_spinlock_t*  ptr) { return _InterlockedExchange8(ptr, 0); }
-
 #else
 
 uint8_t  xt_atomic_load_u8 (const xt_atomic_uint8_t*  ptr) { return __atomic_load_n(ptr, __ATOMIC_SEQ_CST); }
@@ -675,9 +650,6 @@ int8_t   xt_atomic_compare_exchange_i8 (xt_atomic_int8_t*   ptr, int8_t   expect
 int16_t  xt_atomic_compare_exchange_i16(xt_atomic_int16_t*  ptr, int16_t  expected, int16_t  desired) { return __sync_val_compare_and_swap((uint16_t*)ptr, expected, desired); }
 int32_t  xt_atomic_compare_exchange_i32(xt_atomic_int32_t*  ptr, int32_t  expected, int32_t  desired) { return __sync_val_compare_and_swap((uint32_t*)ptr, expected, desired); }
 int64_t  xt_atomic_compare_exchange_i64(xt_atomic_int64_t*  ptr, int64_t  expected, int64_t  desired) { return __sync_val_compare_and_swap((uint64_t*)ptr, expected, desired); }
-
-bool xt_spinlock_trylock(xt_spinlock_t* ptr) { return __atomic_exchange_n(ptr, 1, __ATOMIC_ACQUIRE) == 0; }
-void xt_spinlock_unlock(xt_spinlock_t* ptr)  { __atomic_store_n(ptr, 0, __ATOMIC_RELEASE); }
 
 #endif
 
@@ -906,110 +878,6 @@ void* xthread_queue_consume(xt_queue_t* queue, int timeout_ms)
 }
 
 int xthread_queue_count(xt_queue_t* queue) { return xt_atomic_load_i32(&queue->count); }
-
-void xt_spinlock_lock(xt_atomic_uint8_t* ptr)
-{
-#if defined(__x86_64__) || defined(_M_X64)
-
-    // Stage 1: ~25ns
-    for (int i = 0; i < 5; i++)
-        if (xt_spinlock_trylock(ptr))
-            return;
-
-    // Stage 2: ~400ns
-    for (int i = 0; i < 10; i++)
-    {
-        if (xt_spinlock_trylock(ptr))
-            return;
-
-        _mm_pause();
-    }
-
-    // Stage 3: ~400ns
-    for (int i = 0; i < 3000; i++)
-    {
-        if (xt_spinlock_trylock(ptr))
-            return;
-
-        _mm_pause();
-        _mm_pause();
-        _mm_pause();
-        _mm_pause();
-        _mm_pause();
-        _mm_pause();
-        _mm_pause();
-        _mm_pause();
-        _mm_pause();
-        _mm_pause();
-
-        xthread_yield();
-    }
-
-    // Stage 4: never give up without the lock
-    while (!xt_spinlock_trylock(ptr))
-        xthread_yield();
-
-#elif defined(__arm64__)
-
-    // Stage 1: ~20ns
-    for (int i = 0; i < 5; i++)
-        if (xt_spinlock_trylock(ptr))
-            return;
-
-    // Stage 2: ~1ms
-    for (int i = 0; i < 750; i++)
-    {
-        if (xt_spinlock_trylock(ptr))
-            return;
-
-        __wfe(); // ~1300ns
-
-        xthread_yield();
-    }
-
-    // Stage 3: never give up without the lock
-    while (!xt_spinlock_trylock(ptr))
-        xthread_yield();
-
-#else // wasm: no pause/wfe hint
-
-    while (!xt_spinlock_trylock(ptr))
-    {
-        // Spin on a plain load until the lock looks free, so we don't hammer the cache line with writes
-        for (int i = 0; i < 64 && xt_atomic_load_u8(ptr); i++) {}
-        xthread_yield();
-    }
-
-#endif
-/*
-NOTE: only this function is under the Boost license
-https://github.com/crill-dev/crill
-
-Boost Software License - Version 1.0 - August 17th, 2003
-
-Permission is hereby granted, free of charge, to any person or organization
-obtaining a copy of the software and accompanying documentation covered by
-this license (the "Software") to use, reproduce, display, distribute,
-execute, and transmit the Software, and to prepare derivative works of the
-Software, and to permit third-parties to whom the Software is furnished to
-do so, all subject to the following:
-
-The copyright notices in the Software and this entire statement, including
-the above license grant, this restriction and the following disclaimer,
-must be included in all copies of the Software, in whole or in part, and
-all derivative works of the Software, unless such copies or derivative
-works are solely in the form of machine-executable object code generated by
-a source language processor.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE, TITLE AND NON-INFRINGEMENT. IN NO EVENT
-SHALL THE COPYRIGHT HOLDERS OR ANYONE DISTRIBUTING THE SOFTWARE BE LIABLE
-FOR ANY DAMAGES OR OTHER LIABILITY, WHETHER IN CONTRACT, TORT OR OTHERWISE,
-ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-DEALINGS IN THE SOFTWARE.
-*/
-}
 
 #endif /* XHL_THREAD_IMPL */
 // clang-format on
